@@ -9,6 +9,10 @@
 三个工具通过 **MCP server**（`mcp/server.js`，stdio）暴露给 ZCode，读图方法论作为
 **skill**（`skills/image-reading/`）随插件分发。业务逻辑 `src/core.js` 与源插件完全一致。
 
+> **性能提示**：本版工具经 MCP stdio 子进程暴露，每次调用都有进程通信与 JSON-RPC
+> 序列化开销，**速度明显慢于 DSH 版**（DSH 版为插件内直接调用）。高频/批量看图请
+> 使用 DSH 版；本版适合 ZCode 环境下的轻量、偶发看图。
+
 ## 这是什么
 
 DeepSeek 等纯文本模型没有视觉编码器，无法直接看图。picturereader 把"看图"翻译成

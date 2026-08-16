@@ -20,6 +20,10 @@
 两个版本共用同一套业务核心（`src/core.js`）与读图方法论 skill（`image-reading`），
 三个工具行为完全一致：`image_scan` / `image_ocr` / `image_sample`。
 
+> **ZCode 版性能说明**：ZCode 版通过 MCP（stdio 子进程）暴露工具，每次调用都要
+> 经历进程通信与序列化开销，**速度明显慢于 DSH 版**（DSH 版为插件内直接调用）。
+> 高频看图、批量看图任务请优先使用 DSH 版；ZCode 版适合轻量、偶发看图。
+
 ## 这是什么
 
 DeepSeek 等纯文本模型没有视觉编码器，无法直接看图。picturereader 把"看图"翻译成**模型能理解的结构化文本证据**，并提供一套经过大量真实图片迭代验证的**读图方法论 skill（image-reading）**，让模型像人一样分步看图：
@@ -161,6 +165,8 @@ node scripts/setup-ocr.mjs   # 可选
   且对极小文字/极端艺术字仍可能失败（可配合放大）
 - **性能**：4K 图解码 ~230ms；PaddleOCR 每次调用需 ~2s 加载模型；大图网格渲染
   token 随 size 增长（64×64 color ≈ 3–5K tokens）
+- **ZCode 版 MCP 开销**：ZCode 版工具经 MCP stdio 子进程通信，单次调用比 DSH 版慢
+  （进程启动 + JSON-RPC 序列化）；高频/批量看图建议用 DSH 版
 - **WebP 不支持**（提示转 PNG/JPEG）；GIF 只读首帧
 - **多模态模型的描述不可全信**（本插件可交叉验证，但最终语义仍需人工判断关键场景）
 
