@@ -1,0 +1,23 @@
+{
+    "name":  "picturereader",
+    "version":  "1.0.1",
+    "description":  "Gives text-only models the ability to \u0027read\u0027 images: image_scan (coarse pixel grid + hue/color/structure analysis), image_ocr (Windows or PaddleOCR text recognition) and image_sample (exact pixel texture sampling), plus the image-reading methodology skill. Everything runs locally, no vision API required.",
+    "author":  {
+                   "name":  "picturereader"
+               },
+    "license":  "MIT",
+    "skills":  "skills",
+    "mcpServers":  {
+                       "picturereader":  {
+                                             "command":  "C:\\Program Files\\nodejs\\node.exe",
+                                             "args":  [
+                                                          "D:\\coding\\picturereader_zcode\\mcp\\server.js"
+                                                      ],
+                                             "cwd":  "${ZCODE_PROJECT_DIR}",
+                                             "timeoutMs":  120000,
+                                             "env":  {
+                                                         "PICTUREREADER_CWD":  "${ZCODE_PROJECT_DIR}"
+                                                     }
+                                         }
+                   }
+}

@@ -1,0 +1,16 @@
+{
+    "name":  "picturereader",
+    "description":  "Local marketplace for the picturereader ZCode plugin: pixel-to-text image reading tools (image_scan / image_ocr / image_sample) plus the image-reading methodology skill, for text-only models. Fully local, no vision API.",
+    "owner":  {
+                  "name":  "picturereader"
+              },
+    "plugins":  [
+                    {
+                        "name":  "picturereader",
+                        "version":  "1.0.1",
+                        "description":  "Gives text-only models the ability to \u0027read\u0027 images: downscale + color-quantize PNG/JPEG/GIF/BMP into a coarse pixel grid, OCR text locally, and sample exact pixels for material judgment. No vision model or API key required.",
+                        "category":  "productivity",
+                        "source":  "."
+                    }
+                ]
+}

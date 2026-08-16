@@ -1,0 +1,48 @@
+{
+    "name":  "picturereader-zcode",
+    "version":  "1.0.1",
+    "description":  "ZCode plugin: pixel-to-text image reading for text-only models. Downscales and color-quantizes PNG/JPEG/GIF/BMP and feeds the coarse pixel grid to the model so it can \u0027see\u0027 layout, colors and rough shapes without a vision model. Ported from the picturereader DSH plugin.",
+    "type":  "module",
+    "main":  "src/core.js",
+    "exports":  {
+                    ".":  "./src/core.js",
+                    "./mcp/server.js":  "./mcp/server.js"
+                },
+    "files":  [
+                  "src",
+                  "mcp",
+                  "skills",
+                  ".zcode-plugin",
+                  "scripts",
+                  "README.md",
+                  "LICENSE"
+              ],
+    "scripts":  {
+                    "test":  "node --test",
+                    "preview":  "node scripts/preview.mjs",
+                    "setup-ocr":  "node scripts/setup-ocr.mjs"
+                },
+    "keywords":  [
+                     "zcode",
+                     "zcode-plugin",
+                     "image",
+                     "vision",
+                     "pixels",
+                     "ascii",
+                     "ocr",
+                     "paddleocr",
+                     "hue",
+                     "multimodal",
+                     "mcp"
+                 ],
+    "license":  "MIT",
+    "author":  "picturereader",
+    "engines":  {
+                    "node":  "^22.19 || \u003e=24"
+                },
+    "dependencies":  {
+                         "jpeg-js":  "^0.4.4",
+                         "omggif":  "^1.0.10",
+                         "pngjs":  "^7.0.0"
+                     }
+}
