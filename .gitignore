@@ -1,0 +1,5 @@
+node_modules/
+tests/fixtures-out/
+.paddlex-cache/
+.codex_tmp/
+*.log
