@@ -10,7 +10,7 @@
 ## 这是什么
 
 DeepSeek 等纯文本模型没有视觉编码器，无法直接看图。picturereader 把"看图"翻译成
-模型能理解的**结构化文本证据**，并提供一套经过真实图片训练验证的**读图方法论
+模型能理解的**结构化文本证据**，并提供一套经过大量真实图片迭代验证的**读图方法论
 skill（image-reading）**，让模型像人一样分步看图：
 
 1. **全局定调**：hue families（纯色相指纹）→ structure（条带/对称）→ texture（写实度）→ regions（色块结构）
@@ -29,12 +29,13 @@ skill（image-reading）**，让模型像人一样分步看图：
 
 ### 读图方法论 skill（image-reading）
 
-`skills/image-reading.md` 是经 **34 张真实游戏截图训练 + gemma-4-12b 对照验证**沉淀的
-读图方法论（按 experience / skill / principle / insight 分层），安装后模型自动掌握：
+`skills/image-reading.md` 是一套**经大量真实图片场景迭代验证**的读图方法论
+（按 experience / skill / principle / insight 分层，教训有据可依、找主导模式），
+安装后模型自动掌握：
 - **hue 场景指纹**：cyan 高=水/雾/湖泊，green 高=森林，orange/red 高=暖色人物/火光，
   blue 高=夜晚科幻，achromatic+rough=废墟，green+yellow=翠绿能量/浮空仙境
-- **多模态模型校验规则**：游戏名/品牌必须 OCR 实读（gemma 会猜"原神/崩坏3"）；
-  发光元素颜色以 hue 实测为准（多模态模型系统性误标成"粉红/紫"）
+- **多模态模型校验规则**：游戏名/品牌等文字必须 OCR 实读（多模态模型会猜错）；
+  发光元素颜色以 hue 实测为准（多模态模型对发光色的描述系统性不可靠）
 - **主动验证**：低对比主体（暗色人物/小色块）必须放大确认
 
 ## 安装
@@ -97,7 +98,7 @@ node scripts/preview.mjs     # 生成 fixtures 并预览渲染
 - **成本低**：一次扫描 ≈0.6–2.2K tokens；PaddleOCR 本地跑，无 API 费用
 - **可选增强**：PaddleOCR 一键安装（`scripts/setup-ocr.mjs`），缺失自动降级不崩溃
 - **方法论沉淀**：附带的 image-reading skill 把读图经验固化（场景指纹/校验规则），
-  模型每次看图都带着经过 34 张真实截图验证的经验
+  模型每次看图都带着经过大量图片验证的经验
 
 ## 局限性（重要）
 
