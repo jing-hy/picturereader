@@ -1,6 +1,6 @@
 {
     "name":  "picturereader",
-    "version":  "1.0.1",
+    "version":  "1.0.2",
     "description":  "DSH plugin: pixel-to-text image reading for text-only models. Downscales and color-quantizes PNG/JPEG/GIF/BMP and feeds the coarse pixel grid to the model so DeepSeek can \u0027see\u0027 layout, colors and rough shapes without a vision model.",
     "type":  "module",
     "main":  "src/index.js",
