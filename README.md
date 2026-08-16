@@ -15,7 +15,7 @@
 | 版本 | 平台 | 形态 | 源码 | 安装 |
 |---|---|---|---|---|
 | **DSH 版** | DeepSeek Harness（含 EAC 桌面端） | npm 插件（`dsh.bundle`） | 仓库根目录 | `dsh plugin --profile web add picturereader` |
-| **ZCode 版** | ZCode 桌面端 | 本地 marketplace 插件（MCP server + skill） | `zcode/` 子目录 | Settings → Plugin Management → Discover → 本地目录 |
+| **ZCode 版** | ZCode 桌面端 | 本地 marketplace 插件（MCP server + skill） | [jing-hy/picturereader-zcode](https://github.com/jing-hy/picturereader-zcode)（独立仓库） | 见其 README |
 
 两个版本共用同一套业务核心（`src/core.js`）与读图方法论 skill（`image-reading`），
 三个工具行为完全一致：`image_scan` / `image_ocr` / `image_sample`。
@@ -72,26 +72,11 @@ copy skills\image-reading.md %USERPROFILE%\.dsh\skills\   # Windows
 
 ### ZCode 版
 
-ZCode 版源码在本仓库 `zcode/` 子目录（本地开发目录为 `D:\coding\picturereader_zcode`）。
+ZCode 版是**独立仓库**：[jing-hy/picturereader-zcode](https://github.com/jing-hy/picturereader-zcode)。
 
-```text
-ZCode 桌面端 → Settings → Plugin Management → Discover → "+" → 本地目录
-→ 选择 zcode/ 目录（或本地开发目录 picturereader_zcode）
-→ 市场列表出现 picturereader → 安装
-```
-
-安装并启用后（重启 ZCode 或按提示重连）：
-
-1. **MCP server `picturereader` 自动连接**（stdio 子进程 `node mcp/server.js`），模型工具列表出现 `image_scan` / `image_ocr` / `image_sample`；
-2. **skill `image-reading` 自动出现**在技能列表（图片任务自动触发）；
-3. **（可选）PaddleOCR 增强引擎**：`node scripts/setup-ocr.mjs`。
-
-> **关于安装后的运行位置**：市场安装会把插件目录拷贝到 ZCode 插件缓存
-> （`~/.zcode/cli/plugins/cache/...`），但 `.zcode-plugin/plugin.json` 里 MCP server 的
-> `args` 是**具体绝对路径**，指向所选目录的 `mcp/server.js`——因此 MCP server 始终从
-> **所选目录**运行：改 `src/core.js` 下次调用即生效（热加载）。skill / 工具定义变更
-> 需在 Discover 里卸载后重装生效（或手动同步缓存副本）。若插件目录移动，请同步更新
-> `plugin.json` 里的 `args` 路径。
+ZCode 版通过 **MCP server**（`mcp/server.js`，stdio）把三个工具暴露给 ZCode，
+读图方法论作为 **skill**（`skills/image-reading/`）随插件分发，业务逻辑 `src/core.js`
+与本仓库完全一致。安装与使用请见其 README。
 
 ## 使用
 
@@ -123,14 +108,15 @@ luminance grid / color grid
 ## 开发
 
 ```sh
-# DSH 版（仓库根目录）
+# DSH 版（本仓库）
 npm install
 npm test            # node:test，76 个测试全绿
 node scripts/setup-ocr.mjs   # 可选：装 PaddleOCR
 node scripts/preview.mjs     # 生成 fixtures 并预览渲染
 
-# ZCode 版（zcode/ 子目录）
-cd zcode
+# ZCode 版（独立仓库 jing-hy/picturereader-zcode）
+git clone https://github.com/jing-hy/picturereader-zcode.git
+cd picturereader-zcode
 npm install
 npm test            # node:test
 node scripts/setup-ocr.mjs   # 可选
@@ -141,7 +127,7 @@ node scripts/setup-ocr.mjs   # 可选
 下次调用即生效**；工具定义（schema/描述）改动需重启桌面端。
 
 **热插拔（ZCode 版）**：MCP server 从所选目录运行，改 `src/core.js` 下次调用即生效
-（见上"安装后运行位置"）。
+（详见 picturereader-zcode 仓库 README）。
 
 ## 优势
 
