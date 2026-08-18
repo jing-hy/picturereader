@@ -1,6 +1,6 @@
 {
     "name":  "picturereader-zcode",
-    "version":  "2.0.0",
+    "version":  "2.0.1",
     "description":  "ZCode plugin: unified image understanding for text-only models. Fuses frame-free pseudo-multimodal reading (pixel scan + OCR + sample) with an optional external vision API bridge (LM Studio / llama-server / any OpenAI-compatible endpoint) for full semantic understanding. No extra plugin needed.",
     "type":  "module",
     "main":  "src/core.js",

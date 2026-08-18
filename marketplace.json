@@ -7,7 +7,7 @@
     "plugins":  [
                     {
                         "name":  "picturereader",
-                        "version":  "2.0.0",
+                        "version":  "2.0.1",
                         "description":  "Unified image understanding for text-only models: pixel scan + OCR + sample (pseudo-multimodal, zero dependency) fused with optional external vision API (LM Studio / llama-server / OpenAI-compatible) for full semantic understanding. Low-information guard prevents VLM hallucinations.",
                         "category":  "productivity",
                         "source":  "."

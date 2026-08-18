@@ -29,6 +29,8 @@
 两个版本共用同一套业务核心（`src/core.js`）与读图方法论 skill（`image-reading`），
 四个工具行为完全一致：`image_scan` / `image_ocr` / `image_sample` / `vision_analyze`。
 
+> **兼容性**：DSH 版已验证兼容 **DeepSeek Harness EAC 4.2.0** 及 `@deepseek-ai/dsh-client-ui-workspace` **rc.7**（4.2.0 配套的官方工作区插件版本）。
+
 > **ZCode 版性能说明**：ZCode 版通过 MCP（stdio 子进程）暴露工具，每次调用都要
 > 经历进程通信与序列化开销，**速度明显慢于 DSH 版**（DSH 版为插件内直接调用）。
 > 高频看图、批量看图任务请优先使用 DSH 版；ZCode 版适合轻量、偶发看图。
@@ -161,17 +163,6 @@ node scripts/setup-ocr.mjs   # 可选
 - **可追溯、可验证**：每个结论都有数据支撑（hue 占比、色块坐标、OCR 文本+置信度）
 - **成本低**：一次扫描 ≈0.6–2.2K tokens；PaddleOCR 本地跑，无 API 费用
 - **方法论沉淀**：附带的 image-reading skill 把读图经验固化（场景指纹/校验规则），模型每次看图都带着经过大量图片验证的经验
-
-## 局限性（重要）
-
-- **不是真正的视觉模型**：伪多模态部分文本网格信息量有限，**人脸/表情/花纹等像素级细节读不出**；这是文本模态的硬上限，放大（px_per_cell）只能缩小差距，不能消除
-- **开启 VLM 后存在隐私权衡**：默认（不配 `SEE_BASE`）原始图片不出本机；一旦配置外部端点，`vision_analyze` 会把图片以 base64 **发送到该端点**——本地端点不出本机，**云端端点会出网上传**，按需权衡
-- **语义理解依赖外部端点可用性**：`SEE_BASE`/`SEE_MODEL` 配错、端点未起、网络或显存不足，VLM 调用会失败或超时；本地模型质量也直接决定描述质量
-- **OCR 引擎边界**：Windows OCR 对发光/弯曲/艺术字失效；PaddleOCR 强很多但需选装，且对极小文字/极端艺术字仍可能失败（可配合放大）
-- **性能 / MCP 开销**：ZCode 版工具经 MCP stdio 子进程通信，单次调用比 DSH 版慢；PaddleOCR 每次调用需 ~2s 加载模型、VLM 需 2-5s；高频/批量看图建议用 DSH 版
-- **双版本不可混用**：把 `picturereader-zcode` 塞进 DSH profile 会因无 `dsh.bundle` 启动报错（反之 ZCode 认不了无 `mcp` 的 DSH 包）——请按宿主选对包名
-- **WebP 不支持**（提示转 PNG/JPEG）；GIF 只读首帧
-- **多模态模型的描述不可全信**（本插件可交叉验证，但最终语义仍需人工判断关键场景）
 
 ## License
 
