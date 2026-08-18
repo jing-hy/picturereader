@@ -1,0 +1,269 @@
+/**
+ * VLM (Vision Language Model) bridge for picturereader.
+ *
+ * Talks to any OpenAI-compatible chat-completions endpoint that accepts
+ * image_url data URIs. When the endpoint is a managed local llama-server
+ * and it is not healthy, this module can auto-start it with the configured
+ * multimodal model and (optionally) stop it after the request.
+ *
+ * @module picturereader/vlm
+ */
+
+import { spawn } from 'node:child_process';
+import { stat } from 'node:fs/promises';
+
+// ---------------------------------------------------------------------------
+// Configuration (all via environment variables, defaults are empty/disabled)
+// ---------------------------------------------------------------------------
+
+/** OpenAI-compatible VLM endpoint (empty = VLM disabled). */
+export const DEFAULT_BASE = process.env.SEE_BASE ?? '';
+/** VLM model name. */
+export const DEFAULT_MODEL = process.env.SEE_MODEL ?? '';
+/** Local llama-server executable path. */
+export const DEFAULT_SERVER_EXE = process.env.SEE_SERVER_EXE ?? '';
+/** Local model GGUF path. */
+export const DEFAULT_SERVER_MODEL = process.env.SEE_SERVER_MODEL ?? '';
+/** Vision projector path. */
+export const DEFAULT_SERVER_MMPROJ = process.env.SEE_SERVER_MMPROJ ?? '';
+/** Local server port. */
+export const DEFAULT_PORT = Number(process.env.SEE_SERVER_PORT ?? 8080);
+/** GPU layers for local server. */
+export const DEFAULT_NGL = process.env.SEE_SERVER_NGL ?? '20';
+/** Context size for local server. */
+export const DEFAULT_CTX = Number(process.env.SEE_SERVER_CTX ?? 16384);
+/** API key for remote endpoints. */
+export const DEFAULT_API_KEY = process.env.SEE_API_KEY ?? '';
+
+let serverStartPromise = null;
+let serverChild = null;
+
+/**
+ * Check if VLM is configured (has a base URL).
+ * @returns {boolean} true when VLM endpoint is configured.
+ */
+export function isVlmConfigured() {
+  return DEFAULT_BASE.length > 0;
+}
+
+/**
+ * Build health check URL from base URL.
+ * @param {string} baseURL - the VLM endpoint base URL.
+ * @returns {string} health check URL.
+ */
+export function healthUrlOf(baseURL) {
+  return baseURL.replace(/\/v1$/, '').replace(/\/+$/, '') + '/health';
+}
+
+/**
+ * Probe VLM endpoint health.
+ * @param {string} baseURL - the VLM endpoint base URL.
+ * @param {number} timeoutMs - timeout in milliseconds.
+ * @returns {Promise<boolean>} true when healthy.
+ */
+export async function probe(baseURL, timeoutMs = 3000) {
+  try {
+    const res = await fetch(healthUrlOf(baseURL), { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if the endpoint is a managed local server.
+ * @param {string} baseURL - the VLM endpoint base URL.
+ * @param {number} port - the expected port.
+ * @returns {boolean} true when it's a managed local endpoint.
+ */
+function isManagedEndpoint(baseURL, port) {
+  const u = baseURL.replace(/\/v1$/, '').replace(/\/+$/, '');
+  const m = u.match(/^http:\/\/(127\.0\.0\.1|localhost):(\d+)$/);
+  return m !== null && Number(m[2]) === port;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Build llama-server command arguments.
+ * @param {object} config - VLM configuration.
+ * @returns {string[]} command arguments.
+ */
+export function buildServerArgs(config) {
+  return [
+    '-m', config.serverModel,
+    '--mmproj', config.serverMmproj,
+    '-ngl', String(config.ngl),
+    '--ctx-size', String(config.ctxSize),
+    '--parallel', '1',
+    '--load-mode', 'none',
+    '--threads', '16',
+    '--threads-batch', '32',
+    '--batch-size', '2048',
+    '--ubatch-size', '512',
+    '--cache-type-k', 'q8_0',
+    '--cache-type-v', 'q8_0',
+    '--flash-attn', 'on',
+    '--fit', 'off',
+    '--split-mode', 'none',
+    '--main-gpu', '0',
+    '--prio', '1',
+    '--jinja',
+    '--reasoning', 'on',
+    '--image-min-tokens', '1024',
+    '--alias', config.model,
+    '--host', '127.0.0.1',
+    '--port', String(config.serverPort),
+  ];
+}
+
+/**
+ * Start local llama-server.
+ * @param {object} config - VLM configuration.
+ * @returns {Promise<ChildProcess>} the server process.
+ */
+async function startLocalServer(config) {
+  for (const p of [config.serverExe, config.serverModel, config.serverMmproj]) {
+    try {
+      await stat(p);
+    } catch {
+      throw new Error(`picturereader: local server file not found: ${p}`);
+    }
+  }
+
+  process.env.GGML_CUDA_NO_PINNED = '1';
+  const child = spawn(config.serverExe, buildServerArgs(config), {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+  serverChild = child;
+
+  const deadline = Date.now() + config.healthTimeoutMs;
+  while (Date.now() < deadline) {
+    if (await probe(config.baseURL, 2000)) return child;
+    if (child.exitCode !== null || child.signalCode !== null) break;
+    await sleep(1000);
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {}
+  throw new Error(
+    `picturereader: local llama-server failed to become healthy at ${healthUrlOf(config.baseURL)} within ${config.healthTimeoutMs}ms`,
+  );
+}
+
+/**
+ * Ensure local llama-server is running (auto-start if needed).
+ * @param {object} config - VLM configuration.
+ * @returns {Promise<ChildProcess|null>} the server process, or null if not managed.
+ */
+export async function ensureServer(config) {
+  if (!config.autoStart || !isManagedEndpoint(config.baseURL, config.serverPort)) {
+    return null;
+  }
+  if (await probe(config.baseURL, 3000)) {
+    serverStartPromise = null;
+    return serverChild;
+  }
+  if (serverStartPromise !== null) {
+    try {
+      await serverStartPromise;
+    } catch {
+      serverStartPromise = null;
+    }
+    if (await probe(config.baseURL, 3000)) return serverChild;
+  }
+  serverStartPromise = startLocalServer(config).finally(() => {
+    serverStartPromise = null;
+  });
+  await serverStartPromise;
+  return serverChild;
+}
+
+/**
+ * Stop local llama-server if running.
+ */
+export async function stopServer() {
+  if (serverChild && serverChild.exitCode === null && serverChild.signalCode === null) {
+    try {
+      serverChild.kill('SIGKILL');
+    } catch {}
+  }
+  serverChild = null;
+  serverStartPromise = null;
+}
+
+/**
+ * Send one image-only request to the VLM endpoint.
+ * @param {object} config - VLM configuration.
+ * @param {Array<{mime: string, base64: string}>} images - images to send.
+ * @param {string} prompt - the prompt text.
+ * @returns {Promise<string>} VLM response text.
+ */
+export async function sendVisionRequest(config, images, prompt) {
+  const content = [{ type: 'text', text: prompt }];
+  for (const img of images) {
+    content.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.base64}` } });
+  }
+
+  const body = {
+    model: config.model,
+    stream: false,
+    messages: [{ role: 'user', content }],
+    max_tokens: config.maxTokens,
+  };
+
+  const headers = {
+    'content-type': 'application/json',
+  };
+  if (config.apiKey) {
+    headers.authorization = `Bearer ${config.apiKey}`;
+  }
+
+  const res = await fetch(`${config.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(config.requestTimeoutMs),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`picturereader: VLM HTTP ${res.status}: ${text.slice(0, 300)}`);
+  }
+
+  const json = await res.json();
+  const contentText = json?.choices?.[0]?.message?.content;
+  if (typeof contentText !== 'string' || contentText.length === 0) {
+    throw new Error('picturereader: VLM returned empty content');
+  }
+  return contentText;
+}
+
+/**
+ * Build default VLM configuration.
+ * @param {object} overrides - configuration overrides.
+ * @returns {object} VLM configuration.
+ */
+export function defaultVlmConfig(overrides = {}) {
+  return {
+    baseURL: DEFAULT_BASE,
+    apiKey: DEFAULT_API_KEY,
+    model: DEFAULT_MODEL,
+    serverExe: DEFAULT_SERVER_EXE,
+    serverModel: DEFAULT_SERVER_MODEL,
+    serverMmproj: DEFAULT_SERVER_MMPROJ,
+    serverPort: DEFAULT_PORT,
+    ngl: DEFAULT_NGL,
+    ctxSize: DEFAULT_CTX,
+    autoStart: true,
+    healthTimeoutMs: 120_000,
+    requestTimeoutMs: 300_000,
+    maxTokens: 8192,
+    ...overrides,
+  };
+}

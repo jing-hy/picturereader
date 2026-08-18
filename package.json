@@ -1,7 +1,7 @@
 {
     "name":  "picturereader",
-    "version":  "1.0.3",
-    "description":  "DSH plugin: pixel-to-text image reading for text-only models. Downscales and color-quantizes PNG/JPEG/GIF/BMP and feeds the coarse pixel grid to the model so DeepSeek can \u0027see\u0027 layout, colors and rough shapes without a vision model.",
+    "version":  "2.0.0",
+    "description":  "Unified image understanding plugin for DeepSeek Harness (DSH). Fuses frame-free pseudo-multimodal reading (pixel scan + OCR + sample) with an optional external vision API bridge (local llama-server / LM Studio / any OpenAI-compatible endpoint) for full semantic understanding. No extra plugin needed.",
     "type":  "module",
     "main":  "src/index.js",
     "exports":  {
@@ -31,7 +31,10 @@
                      "ocr",
                      "paddleocr",
                      "hue",
-                     "multimodal"
+                     "multimodal",
+                     "vlm",
+                     "vision-analyze",
+                     "llm-vision"
                  ],
     "license":  "MIT",
     "author":  "picturereader",
