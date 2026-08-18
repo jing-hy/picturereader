@@ -24,7 +24,7 @@ import * as jpeg from 'jpeg-js';
 import { GifReader } from 'omggif';
 import { spawn } from 'node:child_process';
 import { writeFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, release } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -1114,14 +1114,21 @@ export async function ocrImage(buffer, ext, { region, language, engine = 'window
     work = cropped;
   }
   const pngBytes = encodePng(work.data, work.width, work.height);
-  const tmpPath = join(tmpdir(), `picturereader-ocr-${randomBytes(6).toString('hex')}.png`);
+  // WSL compat: powershell.exe (Windows OCR) cannot reach a WSL /tmp path and
+  // GetFileFromPathAsync rejects forward slashes — write the temp PNG under
+  // /mnt/c/Windows/Temp and hand Windows a backslash path.
+  const isWsl = process.platform === 'linux' && /microsoft/i.test(release());
+  const tmpBase = isWsl ? '/mnt/c/Windows/Temp' : tmpdir();
+  const tmpName = `picturereader-ocr-${randomBytes(6).toString('hex')}.png`;
+  const tmpPath = join(tmpBase, tmpName);
+  const winPath = isWsl ? `C:\\Windows\\Temp\\${tmpName}` : tmpPath;
   await writeFile(tmpPath, pngBytes);
   try {
     if (engine === 'paddle') {
       const result = await runPaddleOcr(tmpPath);
       return { width: work.width, height: work.height, lines: result.lines };
     }
-    return await runOcr(tmpPath, { language });
+    return await runOcr(winPath, { language });
   } finally {
     await rm(tmpPath, { force: true }).catch(() => {});
   }
