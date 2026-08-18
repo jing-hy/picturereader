@@ -1144,6 +1144,62 @@ export function paddleCacheHome() {
 }
 
 /**
+ * PaddleOCR input cap: images whose longer side exceeds this are downscaled
+ * before recognition. Paddle's predict time scales roughly linearly with
+ * pixel count (a 2560x1440 frame takes ~15-18s vs ~3.5s for 900x220), which
+ * can exceed the client's tool-call timeout on full screenshots. Downscaling
+ * to this cap keeps calls within limits while preserving text recognition
+ * (verified: 12/12 lines still read at 1600px).
+ */
+export const PADDLE_MAX_LONG_SIDE = 1600;
+
+/**
+ * Box-average downscale so the longer side fits `maxLongSide`. Returns the
+ * same buffer untouched when no downscale is needed.
+ * @param rgba - RGBA `Buffer`.
+ * @param width - source width.
+ * @param height - source height.
+ * @param maxLongSide - cap on the longer side in pixels.
+ * @returns `{ data, width, height, downscaled }`.
+ */
+export function downscaleRgba(rgba, width, height, maxLongSide = PADDLE_MAX_LONG_SIDE) {
+  const scale = Math.min(1, maxLongSide / Math.max(width, height));
+  if (scale >= 1) return { data: rgba, width, height, downscaled: false };
+  const nw = Math.max(1, Math.round(width * scale));
+  const nh = Math.max(1, Math.round(height * scale));
+  const out = Buffer.alloc(nw * nh * 4);
+  for (let cy = 0; cy < nh; cy += 1) {
+    const y0 = Math.floor((cy * height) / nh);
+    const y1 = Math.max(y0 + 1, Math.floor(((cy + 1) * height) / nh));
+    for (let cx = 0; cx < nw; cx += 1) {
+      const x0 = Math.floor((cx * width) / nw);
+      const x1 = Math.max(x0 + 1, Math.floor(((cx + 1) * width) / nw));
+      let sumR = 0;
+      let sumG = 0;
+      let sumB = 0;
+      let sumA = 0;
+      const n = (y1 - y0) * (x1 - x0);
+      for (let y = y0; y < y1; y += 1) {
+        const row = y * width * 4;
+        for (let x = x0; x < x1; x += 1) {
+          const p = row + x * 4;
+          sumR += rgba[p];
+          sumG += rgba[p + 1];
+          sumB += rgba[p + 2];
+          sumA += rgba[p + 3];
+        }
+      }
+      const o = (cy * nw + cx) * 4;
+      out[o] = Math.round(sumR / n);
+      out[o + 1] = Math.round(sumG / n);
+      out[o + 2] = Math.round(sumB / n);
+      out[o + 3] = Math.round(sumA / n);
+    }
+  }
+  return { data: out, width: nw, height: nh, downscaled: true };
+}
+
+/**
  * Whether the optional PaddleOCR environment is available. PaddleOCR is an
  * OPTIONAL engine: when it is missing, callers must degrade gracefully to the
  * Windows engine instead of failing.
