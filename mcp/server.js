@@ -2,10 +2,11 @@
  * picturereader MCP server — exposes the image-reading tools to ZCode as a
  * Model Context Protocol stdio server.
  *
- * Three tools, identical in behavior to the original DSH plugin:
- * - `image_scan`    coarse pixel grid + hue/color/structure analysis
- * - `image_ocr`     text recognition (Windows OCR default, PaddleOCR optional)
- * - `image_sample`  exact-pixel texture sampling for material judgment
+ * Four tools, identical in behavior to the original DSH plugin:
+ * - `image_scan`      coarse pixel grid + hue/color/structure analysis
+ * - `image_ocr`       text recognition (Windows OCR default, PaddleOCR optional)
+ * - `image_sample`    exact-pixel texture sampling for material judgment
+ * - `vision_analyze`  unified pipeline: low-info guard + optional scan/OCR/VLM
  *
  * The entire business logic lives in `src/core.js`, loaded dynamically with a
  * cache-busting query keyed on the file's mtime (see `importCore`), so editing
@@ -22,6 +23,8 @@ import { extname, isAbsolute, resolve as resolvePath } from 'node:path';
 import { stat, readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
+import { isLowInformationImage } from '../src/guard.js';
+import { ensureServer, stopServer, sendVisionRequest, defaultVlmConfig, isVlmConfigured } from '../src/vlm.js';
 
 /** The MCP protocol version this server speaks. */
 export const PROTOCOL_VERSION = '2025-06-18';
@@ -315,8 +318,119 @@ export async function executeSample(args) {
 }
 
 /**
+ * Parse a boolean argument with fallback.
+ * @param {any} value - the argument value.
+ * @param {boolean} fallback - default value.
+ * @returns {boolean} parsed boolean.
+ */
+function boolArg(value, fallback = false) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  return String(value) === 'true' || String(value) === '1';
+}
+
+/**
+ * `vision_analyze`: unified image understanding pipeline.
+ * Runs low-information guard, optional scan, optional OCR, optional VLM.
+ * @param args - tool arguments.
+ * @returns the combined analysis result.
+ */
+export async function executeVisionAnalyze(args) {
+  const { core, filePath, ext } = await loadImageArgs(args, 'vision_analyze');
+  const absolutePath = resolveImagePath(filePath);
+  const data = await readImageFile(absolutePath, 'vision_analyze');
+  const image = decodeBounded(core, data, ext, 'vision_analyze');
+
+  const includeScan = args.include_scan === undefined ? true : boolArg(args.include_scan, true);
+  const includeOcr = args.include_ocr === undefined ? false : boolArg(args.include_ocr, false);
+  const includeVlm = args.include_vlm === undefined ? true : boolArg(args.include_vlm, true);
+  const allowLowInfo = boolArg(args.allow_low_info, false);
+  const stopAfter = boolArg(args.stop_after, false);
+  const prompt = args.prompt ?? 'Describe this image in detail.';
+
+  // Check if VLM is configured
+  const vlmAvailable = isVlmConfigured();
+  const shouldCallVlm = includeVlm && vlmAvailable;
+
+  const lowInfo = isLowInformationImage(image.data, image.width, image.height);
+  const blocks = [];
+  let ocrText = '';
+  let scanText = '';
+  let vlmText = '';
+
+  if (lowInfo && !allowLowInfo) {
+    const message =
+      '[vision_analyze] 低信息量拦截：图片空白或内容极少，为避免 VLM 幻觉，未调用 VLM。' +
+      '请检查截图是否空白/未渲染/窗口在屏幕外；如确需识别请设置 allow_low_info=true。';
+    return { path: absolutePath, lowInformation: true, message, combined: message };
+  }
+
+  if (includeScan) {
+    const analysis = core.analyzeImage(image.data, image.width, image.height, {
+      size: 32,
+      mode: 'auto',
+      region: undefined,
+      palette: 'auto'
+    });
+    scanText = core.renderImageScan({
+      path: absolutePath,
+      width: image.width,
+      height: image.height,
+      ...analysis
+    });
+    blocks.push(`[scan]\n${scanText}`);
+  }
+
+  if (includeOcr) {
+    const engine = args.ocr_engine ?? 'windows';
+    const ocr = await core.ocrImage(data, ext, { engine });
+    ocrText = core.renderOcr({
+      path: absolutePath,
+      width: ocr.width,
+      height: ocr.height,
+      region: 'full',
+      engine: ocr.engine,
+      lines: ocr.lines
+    });
+    blocks.push(`[ocr]\n${ocrText}`);
+  }
+
+  if (shouldCallVlm) {
+    const config = defaultVlmConfig();
+    let startedByUs = false;
+    try {
+      const child = await ensureServer(config);
+      startedByUs = child !== null;
+      const base64 = data.toString('base64');
+      const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : 'image/bmp';
+      const safePrompt =
+        prompt +
+        '\n\n重要：只描述图中明确可见的内容。如果图中没有明显物体/文字/界面元素，请直接回答：画面空白或内容极少。不要推测、不要脑补不存在的角色/场景/文字。';
+      vlmText = await sendVisionRequest(config, [{ mime, base64 }], safePrompt);
+      blocks.push(`[vlm]\n${vlmText}`);
+    } finally {
+      if (stopAfter && startedByUs) {
+        await stopServer();
+      }
+    }
+  } else if (includeVlm && !vlmAvailable) {
+    blocks.push('[vlm] VLM 未配置（SEE_BASE 环境变量为空）');
+  }
+
+  const combined = blocks.join('\n\n---\n\n');
+  return {
+    path: absolutePath,
+    lowInformation: false,
+    ...(scanText ? { scan: scanText } : {}),
+    ...(ocrText ? { ocr: ocrText } : {}),
+    ...(vlmText ? { vlm: vlmText } : {}),
+    combined
+  };
+}
+
+/**
  * Dispatch a tool call to its implementation.
- * @param name - tool name ('image_scan' | 'image_ocr' | 'image_sample').
+ * @param name - tool name ('image_scan' | 'image_ocr' | 'image_sample' | 'vision_analyze').
  * @param args - tool arguments object.
  * @returns the structured tool result.
  */
@@ -326,6 +440,7 @@ export async function executeTool(name, args) {
     case 'image_scan': return executeScan(cleanArgs);
     case 'image_ocr': return executeOcr(cleanArgs);
     case 'image_sample': return executeSample(cleanArgs);
+    case 'vision_analyze': return executeVisionAnalyze(cleanArgs);
     default: throw new Error(`unknown tool: ${name}`);
   }
 }
@@ -453,11 +568,65 @@ export const TOOLS = [
       },
       required: ['file_path', 'region']
     }
+  },
+  {
+    name: 'vision_analyze',
+    description: [
+      'Unified image understanding: decode an image, run a low-information guard, optionally scan pixels, OCR text, and/or ask the VLM for a semantic description.',
+      'Use this when you need one call to both verify what is in the image and get a natural-language interpretation.',
+      'Returns evidence blocks: scan (pixel stats), ocr (real text), vlm (model description). If low-information guard triggers and allow_low_info is false, it will not call the VLM.',
+      'Supported formats: PNG, JPEG, GIF (first frame), BMP. WebP is not supported yet.',
+      'VLM is optional: if SEE_BASE is not configured, VLM calls are skipped automatically.',
+      'Smart API calling: simple images (low color diversity, high dominant color coverage) skip VLM automatically.',
+      'Multiple questions: call this tool multiple times with different prompts on the same image for comprehensive analysis.',
+      'Cross-validation: main model should verify VLM results against pixel scan and OCR evidence.'
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        file_path: { type: 'string', description: IMAGE_PATH_DESCRIPTION },
+        prompt: {
+          type: 'string',
+          description: 'Question/instruction for the VLM, e.g. "Describe this UI" or "What is wrong with this map rendering?"'
+        },
+        include_scan: {
+          type: 'boolean',
+          description: 'Include pixel scan evidence (default true).'
+        },
+        include_ocr: {
+          type: 'boolean',
+          description: 'Include OCR text evidence (default false; set true when text matters).'
+        },
+        ocr_engine: {
+          type: 'string',
+          enum: ['windows', 'paddle'],
+          description: 'OCR engine: windows (default) or paddle (better for glowing/curved/game text).'
+        },
+        include_vlm: {
+          type: 'boolean',
+          description: 'Include VLM description (default true, but skipped if SEE_BASE not configured).'
+        },
+        allow_low_info: {
+          type: 'boolean',
+          description: 'Skip the low-information guard and force VLM even on blank/simple images (default false).'
+        },
+        stop_after: {
+          type: 'boolean',
+          description: 'Stop the local llama-server after this call if this plugin started it (default false).'
+        }
+      },
+      required: ['file_path']
+    }
   }
 ];
 
 /** Render a structured tool result as the text block fed back to the model. */
 async function renderResult(name, value) {
+  // vision_analyze has its own combined field
+  if (name === 'vision_analyze') {
+    return value.combined ?? value.message ?? JSON.stringify(value);
+  }
   const core = await importCore();
   const renderer =
     name === 'image_scan' ? core.renderImageScan
@@ -571,7 +740,7 @@ export function runServer(input = process.stdin, output = process.stdout, log = 
   };
   rl.on('line', onLine);
   rl.on('error', onError);
-  log.write('picturereader MCP server ready (image_scan / image_ocr / image_sample)\n');
+  log.write('picturereader MCP server ready (image_scan / image_ocr / image_sample / vision_analyze)\n');
   return () => {
     rl.off('line', onLine);
     rl.off('error', onError);

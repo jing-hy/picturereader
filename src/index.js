@@ -15,6 +15,7 @@
  */
 
 import { createImageScanTool, createImageOcrTool, createImageSampleTool } from './tool.js';
+import { createVisionAnalyzeTool } from './vision-analyze.js';
 
 export const name = 'picturereader';
 
@@ -26,5 +27,6 @@ export function apply(ctx) {
     ctx.tools.register(createImageScanTool(ctx));
     ctx.tools.register(createImageOcrTool(ctx));
     ctx.tools.register(createImageSampleTool(ctx));
+    ctx.tools.register(createVisionAnalyzeTool(ctx));
   });
 }
