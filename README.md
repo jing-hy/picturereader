@@ -11,6 +11,8 @@
 
 DeepSeek 等纯文本模型没有视觉编码器，无法直接看图片；DSH 原生缩略图也需要模型被声明为「支持图片」才会渲染。
 
+> ⭐ **已支持外部视觉 API（OpenAI 兼容端点 / LM Studio / 云端 VLM），由 LLM 自行按需调用**：配置好端点后，模型会在智能/严谨模式下自主判断"这张图值不值得外呼视觉模型"，需要时用 `vision_analyze` 调外部 API 做语义理解，简单内容则本地像素/OCR 搞定——**外部 API 是即插即用的增强能力，不是必须依赖**。
+
 picturereader 解决两件事：
 
 1. **把「看图/读文档」翻译成纯文本模型能理解的结构化证据**（像素级 huel/结构/材质分析 + OCR 实读 + 可选 VLM 语义描述），并沉淀为读图方法论 skill。
@@ -27,9 +29,59 @@ picturereader 解决两件事：
 - **`stream` 拦截**：捕获请求里的 `image` block → 导出到 `~/.dsh/picturereader-vision/images/` → 替换成文本路径 + 本地工具链引导 → 转发给原始 adapter。**pi-ai 收到的是纯文本，不会报 `UNSUPPORTED_CONTENT`**；`opencode-go` 等走 `@earendil-works/pi-ai` 的 provider 同样经此孪生获得原生缩略图能力。
 - 隐私模式下分析只走本地工具，绝不外发。
 
-### ② 三模式路由（隐私 / 智能 / 严谨）
+### ② 智能路由（隐私 / 智能 / 严谨 三模式）
 
-统一在 `routing.js` + `runtime.js` 收敛「什么时候走外部 VLM、什么时候只用本地、要不要交叉验证」，供各工具 / 图片桥 / vision_analyze 共享，保证行为一致（详见下方「三模式」表）。隐私模式是**硬门禁**：即使配置了外部 API 也一律不调用。
+**这是 picturereader 的"大脑"**：统一在 `routing.js` + `runtime.js` 收敛「什么时候走外部 VLM、什么时候只用本地、要不要交叉验证」，供各工具 / 图片桥 / 视觉孪生 `stream` / `vision_analyze` 共享，保证整条图链都遵守同一套路由策略。
+
+#### 路由决策原理
+
+每次看图，模型面对的问题其实是同一个：「这张图，值得花什么成本、用哪条路线读懂它？」picturereader 把答案预置成三种策略，模型据此自主决策，同时 host 侧做硬约束兜底：
+
+```
+图片进来 → 孪生 stream 拦截 / 工具被调用
+        → 读入当前「模式」→ 得到该模式的路由策略
+        → 模型 / 工具按策略选路线：
+            本地像素分析（image_scan / image_sample）
+            本地文字识别（image_ocr：windows / paddle / rapid）
+            外部语义理解（vision_analyze include_vlm=true → VLM）
+            交叉验证（多路证据对照）
+```
+
+核心决策函数 `visionAnalyzeDefaults(mode)` 定义各模式"默认的证据组合"：
+
+| 模式 | 默认 include_scan | 默认 include_ocr | 默认 include_vlm | allow_low_info |
+|---|---|---|---|---|
+| **隐私（privacy）** | ✅ | ✅ | ❌（硬禁） | ❌ |
+| **智能（smart）** | ✅ | ❌（按需） | ✅（值得才调） | ❌ |
+| **严谨（strict）** | ✅ | ✅ | ✅ | ❌ |
+
+#### 三种模式的路线策略
+
+**🕶 隐私模式（Privacy）——零外呼硬门禁**
+- **绝不调用**任何外部视觉端点，即使你在设置卡配了 API。
+- 约束是 host 侧强制：`runtime.js` 使 `isVlmConfigured()` 恒为 `false`，`vision_analyze` 强制 `include_vlm=false`，视觉孪生 `stream` 的降级文本也明确"只用本地工具"。
+- 模型只能用本地工具：`image_scan` / `image_ocr` / `image_sample` / `image_crop` / `image_palette` / `image_compare`。图片字节不出本机。
+- 适用：敏感图片（身份证、合同、私人截图）、离线、零外部流量审计场景。
+
+**⚡ 智能模式（Smart）——省轮数、省时间（默认）**
+- 目标：**先把成本压到最低，复杂内容才值得外呼**。
+- 决策流程：先 `image_scan` 快速看整体 → 自行判断：
+  1. 图片以文字为主 → `image_ocr` 读文字即可，**不必调 VLM**；
+  2. 普通图表 / 界面 / 简单内容 → `image_scan` + `image_sample` 自己看就能说清，**不必调 VLM**；
+  3. 仅当内容复杂、需语义理解（照片、抽象画面）**且配置了端点**时，才 `vision_analyze(include_vlm=true)` 走外部 VLM。
+- 视觉孪生死活都会先把图片导出成本地路径，模型可随时本地深挖，不会被困在"必须外呼"的死路。
+
+**🎯 严谨模式（Strict）——交叉验证、细看细节**
+- 目标：**可靠性优先**，不贪省。
+- 决策：先 `image_scan` 了解整体 → 必要时 `image_ocr` 读文字、`image_sample` 细看细节 → 对关键判断做**交叉验证**（把像素证据、OCR 证据、（可选）VLM 语义描述相互对照，不轻信单一来源）。
+- 允许使用外部 VLM（需配置），但强度更高、可追溯。
+- 适用：需要高准确率与可复现结论的场景（审图、校对、数据分析）。
+
+> **隐私硬门禁贯穿所有入口**：无论走哪个工具/桥，`runtime.js` 的模式快照都会在调用点做校验，`routePolicyText(mode)` 还会把当前策略注入给模型的提示里，双保险。
+
+#### 与视觉孪生 adapter 的协同
+
+三模式不仅约束 `vision_analyze`，也约束视觉孪生 `registerTwinAdapters` 的 `stream` 拦截：图片块总是被**无条件**替换成文本（路径 + 本地证据引导，这是模型能读懂的前提），但**是否/何时进一步外呼 VLM** 由当前模式决定——隐私模式恒不透传图片、不发起外部调用；智能/严谨模式在需要且已配置时才走外部语义理解。因此"原生缩略图"与"隐私零外呼"可以同时成立，互不冲突。
 
 ### ③ 本地工具链（纯本地、纯 JS 像素级）
 
@@ -48,9 +100,12 @@ picturereader 解决两件事：
 
 把 **pdf / docx / doc / xlsx / xls / pptx / ppt** 逐页转成 PNG（LiberOffice headless → PDF → PyMuPDF），供模型逐页 OCR / 扫描分析。纯本地、零网络；支持 `dpi` / `max_pages` / `out_dir` / 批量 `file_paths`。
 
-### ⑤ 外部 VLM 桥（可选）
+### ⑤ 外部 VLM 桥（已支持，由 LLM 自行调用）
 
-OpenAI 兼容聊天补全端点（LM Studio / llama-server / 云端网关 / GLM-4V-Flash 免费模型），通过 `sendVisionRequest` 以 data URI 送图。**baseURL 自动补 `/v1/chat/completions`**（无需手写完整路径）。受三模式路由约束，隐私模式下即使配置也绝不调用。
+**已支持外部视觉 API，且调用时机完全交给 LLM 自主判断**：配置好 OpenAI 兼容端点后（LM Studio / llama-server / 云端网关 / GLM-4V-Flash 免费模型），模型在**智能 / 严谨模式**下会自行判断"这张图是否值得外呼视觉模型"——简单内容用本地像素/OCR 就够，复杂内容（照片、抽象画面、需语义理解）才通过 `vision_analyze(include_vlm=true)` 调 `sendVisionRequest` 以 data URI 送图给外部 VLM，取回语义描述。**baseURL 自动补 `/v1/chat/completions`**（无需手写完整路径）。
+
+- LLM 自行调用 = 你不用手动切模型/手动发图，模型按模式策略在该外呼时自己调外部 API。
+- 隐私模式仍为硬门禁：即使配置了外部 API 也绝不调用、绝不外发图片字节。
 
 ### ⑥ 设置卡片「图片阅读」
 
