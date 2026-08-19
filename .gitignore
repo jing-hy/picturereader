@@ -3,3 +3,5 @@ tests/fixtures-out/
 .paddlex-cache/
 .codex_tmp/
 *.log
+
+*.tgz

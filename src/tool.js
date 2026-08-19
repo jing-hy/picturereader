@@ -255,9 +255,9 @@ export function createImageOcrTool(ctx) {
   return {
     name: 'image_ocr',
     description: [
-      'Recognize text in a local image. Two engines: engine="windows" (default) uses the Windows built-in OCR (no install, good for printed/UI text); engine="paddle" uses PaddleOCR via the local paddle_venv (much better for glowing, curved, stylized or game-rendered text and complex backgrounds, Chinese-friendly; ~2s model load per call).',
-      'Use it together with image_scan: when the pixel grid shows a dense, regular, high-contrast structure that looks like text (e.g. titles, labels, buttons, dialogs, glowing banners), call image_ocr on that region and read the actual characters. If the Windows engine returns nothing but text is expected, retry with engine="paddle".',
-      'Parameters: file_path (required), region: [x0, y0, x1, y1] (0..1 fractions) or focus: [row0, col0, row1, col1] (grid coordinates) to restrict recognition to an area, language (optional BCP-47 tag like "zh-Hans" or "en-US", Windows engine only), engine ("windows" default, "paddle").',
+      'Recognize text in a local image. Three engines: engine="windows" (default) uses the Windows built-in OCR (no install, good for printed/UI text); engine="paddle" uses PaddleOCR via the local paddle_venv (much better for glowing, curved, stylized or game-rendered text and complex backgrounds, Chinese-friendly; ~2s model load per call); engine="rapid" uses RapidOCR via the local rapid_venv (bundled ONNX models, no network download, fast).',
+      'Use it together with image_scan: when the pixel grid shows a dense, regular, high-contrast structure that looks like text (e.g. titles, labels, buttons, dialogs, glowing banners), call image_ocr on that region and read the actual characters. If the Windows engine returns nothing but text is expected, retry with engine="paddle" or engine="rapid".',
+      'Parameters: file_path (required), region: [x0, y0, x1, y1] (0..1 fractions) or focus: [row0, col0, row1, col1] (grid coordinates) to restrict recognition to an area, language (optional BCP-47 tag like "zh-Hans" or "en-US", Windows engine only), engine ("windows" default, "paddle", "rapid").',
       'The result lists each recognized line with its pixel bounding box and confidence score (paddle).'
     ].join(' '),
     parameters: {
@@ -284,8 +284,8 @@ export function createImageOcrTool(ctx) {
         },
         engine: {
           type: 'string',
-          enum: ['windows', 'paddle'],
-          description: '"windows" (default) = Windows built-in OCR; "paddle" = PaddleOCR via local paddle_venv (better for glowing/curved/game text).'
+          enum: ['windows', 'paddle', 'rapid'],
+          description: '"windows" (default) = Windows built-in OCR; "paddle" = PaddleOCR via local paddle_venv (better for glowing/curved/game text); "rapid" = RapidOCR via local rapid_venv (bundled ONNX models, fast).'
         }
       },
       required: ['file_path']
@@ -299,7 +299,7 @@ export function createImageOcrTool(ctx) {
           width: { type: 'integer' },
           height: { type: 'integer' },
           region: { type: 'string' },
-          engine: { type: 'string', enum: ['windows', 'paddle'] },
+          engine: { type: 'string', enum: ['windows', 'paddle', 'rapid'] },
           note: { type: 'string' },
           lines: {
             type: 'array',
@@ -349,8 +349,8 @@ export function createImageOcrTool(ctx) {
         throw new Error('image_ocr: language must be a non-empty BCP-47 tag');
       }
       const engine = args.engine === undefined ? 'windows' : String(args.engine);
-      if (engine !== 'windows' && engine !== 'paddle') {
-        throw new Error("image_ocr: engine must be 'windows' (default) or 'paddle'");
+      if (engine !== 'windows' && engine !== 'paddle' && engine !== 'rapid') {
+        throw new Error("image_ocr: engine must be 'windows' (default) or 'paddle' or 'rapid'");
       }
 
       const cwd = exec.agent?.session?.header?.cwd;
@@ -387,13 +387,18 @@ export function createImageOcrTool(ctx) {
         regionDisplay = 'full';
       }
 
-      // PaddleOCR is an optional engine: degrade gracefully to the Windows
-      // engine (with a note) when it is missing or fails — never crash.
+      // PaddleOCR / RapidOCR are optional engines: degrade gracefully to the
+      // Windows engine (with a note) when they are missing or fail — never crash.
+      const OPTIONAL = {
+        paddle: { available: () => core.paddleAvailable(), install: 'node scripts/setup-ocr.mjs' },
+        rapid: { available: () => core.rapidAvailable(), install: 'node scripts/setup-rapid.mjs' }
+      };
       let effectiveEngine = engine;
       let note;
-      if (engine === 'paddle' && !(await core.paddleAvailable())) {
+      const opt = OPTIONAL[engine];
+      if (opt !== undefined && !(await opt.available())) {
         effectiveEngine = 'windows';
-        note = 'PaddleOCR is not installed (engine="paddle" requested) — fell back to Windows OCR. To install it, run: node scripts/setup-ocr.mjs (see README).';
+        note = `${engine[0].toUpperCase()}${engine.slice(1)}OCR is not installed (engine="${engine}" requested) — fell back to Windows OCR. To install it, run: ${opt.install} (see README).`;
       }
       let result;
       try {
@@ -403,9 +408,9 @@ export function createImageOcrTool(ctx) {
           engine: effectiveEngine
         });
       } catch (error) {
-        if (engine === 'paddle' && effectiveEngine === 'paddle') {
+        if (opt !== undefined && effectiveEngine === engine) {
           effectiveEngine = 'windows';
-          note = `PaddleOCR failed (${error.message.slice(0, 140)}) — fell back to Windows OCR.`;
+          note = `${engine[0].toUpperCase()}${engine.slice(1)}OCR failed (${error.message.slice(0, 140)}) — fell back to Windows OCR.`;
           result = await core.ocrImage(data, ext, {
             region: regionArray,
             language: args.language === undefined ? undefined : String(args.language).trim(),

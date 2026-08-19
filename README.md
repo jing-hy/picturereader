@@ -1,193 +1,221 @@
 # picturereader
 
-> **v2.0.0** —— 给纯文本模型（如 deepseek-v4-flash）的**全能"读图"能力**。
-> 融合 **独立伪多模态识图** 与 **外部视觉 API 接口**，一个插件搞定全部，**无需另装任何插件**。
-
-> - **DSH 版**：DeepSeek Harness 插件（`dsh-plugin`，含 DSH EAC 桌面端）—— 本分支（main）
-> - **ZCode 版**：ZCode 桌面端插件（`zcode-plugin`，经 MCP 暴露工具）—— [zcode 分支](https://github.com/jing-hy/picturereader/tree/zcode)
+> **v3.0.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
+> 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）与**可选外部 VLM 桥**。一个插件全包，无需另装。
 
 [![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
-## 本轮工作（v2.0.0 新增）
+---
 
-在原有的**本地伪多模态识图**（像素扫描 + OCR + 取样，零外部依赖）之上，融合了社区 `dsh-universal-vision` 的优势，形成一套**统一、可交叉验证的完整识图栈**：
+## 定位
 
-1. **新增外部视觉 API 接口**（`vlm.js`）：桥接任意 OpenAI 兼容的视觉端点（本地 llama-server / LM Studio / vLLM / 云端网关），让模型获得真正的**语义理解**能力（场景、角色、界面、风格）。
-2. **新增统一分析工具 `vision_analyze`**（`vision-analyze.js`）：一次调用即可取回「低信息拦截 + 像素扫描 + OCR + VLM」多路证据。
-3. **新增低信息量拦截**（`guard.js`）：自动识别空白/未渲染/简单图片，避免小 VLM 在空图上幻觉，也节省调用成本。
-4. **证据交叉验证**：VLM 描述与像素/OCR 实测冲突时，以实测为准——伪多模态与真 VLM 互为印证，抑制幻觉。
-5. **多次提问**：可对同一张图用 `vision_analyze` 以不同 `prompt` 反复提问，从多角度复核同一内容。
+DeepSeek 等纯文本模型没有视觉编码器，无法直接看图片；DSH 原生缩略图也需要模型被声明为「支持图片」才会渲染。
 
-> **核心优势一句话**：**独立伪多模态识图（零依赖、可离线） + 外部 API 语义接口（可选、即插即用）** —— 简单图用像素就够，复杂图一键接 VLM，一个插件全包含，不需要再装 `dsh-universal-vision` 或任何其他读图插件。
+picturereader 解决两件事：
 
-## 版本总览
+1. **把「看图/读文档」翻译成纯文本模型能理解的结构化证据**（像素级 huel/结构/材质分析 + OCR 实读 + 可选 VLM 语义描述），并沉淀为读图方法论 skill。
+2. **通过「视觉孪生 adapter」让纯文本模型在 DSH 里获得原生缩略图体验**：勾选模型即生成「(视觉)」变体，粘贴图片显示原生缩略图、图片块进会话、并被自动分析成文本路径 + 本地证据再交给模型——模型拿到的永远是纯文本，不会触发 `UNSUPPORTED_CONTENT`。
 
-| 版本 | 平台 | 形态 | 源码 | 安装 |
-|---|---|---|---|---|
-| **DSH 版** | DeepSeek Harness（含 EAC 桌面端） | npm 插件（`dsh.bundle`） | 本仓库（main） | `dsh plugin --profile web add picturereader` |
-| **ZCode 版** | ZCode 桌面端 | 本地 marketplace 插件（MCP server + skill） | [zcode 分支](https://github.com/jing-hy/picturereader/tree/zcode) | `npm install picturereader-zcode` |
+> 版本徽章与兼容性：已验证兼容 **DeepSeek Harness EAC 4.2.0** 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。
 
-两个版本共用同一套业务核心（`src/core.js`）与读图方法论 skill（`image-reading`），
-四个工具行为完全一致：`image_scan` / `image_ocr` / `image_sample` / `vision_analyze`。
+## 功能总览
 
-> **兼容性**：DSH 版已验证兼容 **DeepSeek Harness EAC 4.2.0** 及 `@deepseek-ai/dsh-client-ui-workspace` **rc.7**（4.2.0 配套的官方工作区插件版本）。
+### ① 视觉孪生 adapter（原生缩略图 + 自动分析）
 
-> **ZCode 版性能说明**：ZCode 版通过 MCP（stdio 子进程）暴露工具，每次调用都要
-> 经历进程通信与序列化开销，**速度明显慢于 DSH 版**（DSH 版为插件内直接调用）。
-> 高频看图、批量看图任务请优先使用 DSH 版；ZCode 版适合轻量、偶发看图。
+- **Proxy 原位包装**：对被勾选的模型所属 provider，用 `Proxy` 把其 adapter 包装成「孪生」并原位替换（`registerTwinAdapters`，卸载经 `ctx.effect` 还原），不重复注册。
+- **`listModels` / `resolveModel`**：对被勾选模型声明 `inputModalities: ['text','image']`、名称加「(视觉)」后缀 → DSH 认为它支持图片 → **原生缩略图渲染、图片块进会话、粘贴准入**全部解锁。
+- **`stream` 拦截**：捕获请求里的 `image` block → 导出到 `~/.dsh/picturereader-vision/images/` → 替换成文本路径 + 本地工具链引导 → 转发给原始 adapter。**pi-ai 收到的是纯文本，不会报 `UNSUPPORTED_CONTENT`**；`opencode-go` 等走 `@earendil-works/pi-ai` 的 provider 同样经此孪生获得原生缩略图能力。
+- 隐私模式下分析只走本地工具，绝不外发。
 
-## 这是什么
+### ② 三模式路由（隐私 / 智能 / 严谨）
 
-DeepSeek 等纯文本模型没有视觉编码器，无法直接看图。picturereader 把"看图"翻译成**模型能理解的结构化文本证据**，并提供一套经过大量真实图片迭代验证的**读图方法论 skill（image-reading）**，让模型像人一样分步看图：
+统一在 `routing.js` + `runtime.js` 收敛「什么时候走外部 VLM、什么时候只用本地、要不要交叉验证」，供各工具 / 图片桥 / vision_analyze 共享，保证行为一致（详见下方「三模式」表）。隐私模式是**硬门禁**：即使配置了外部 API 也一律不调用。
 
-1. **全局定调**：hue families（纯色指纹）→ structure（条纹/对称）→ texture（写实度）→ regions（色块结构）
-2. **主动找主体**：px_per_cell 定向放大（深色/低对比/小色块不会漏）
-3. **文字验证**：PaddleOCR 实读（防多模态幻觉）
-4. **材质判断**：image_sample 像素取样
-5. **（可选）VLM 语义理解**：外部视觉 API 提供场景/角色/界面/风格的自然语言描述
-6. **综合描述**：带证据等级的连贯画面描述，伪多模态与 VLM 交叉验证
-
-## 工具
+### ③ 本地工具链（纯本地、纯 JS 像素级）
 
 | 工具 | 作用 |
 |---|---|
-| `image_scan` | 全局/区域扫描：亮度/颜色网格 + regions 色块 + shade diversity + texture mix + structure（条纹/对称） + **像素级 colors** + **hue families 纯色指纹**；支持 `focus`/`region` 局部放大、`px_per_cell` 像素密度定向放大 |
-| `image_ocr` | 文字识别双引擎：`windows`（内置，默认）/ `paddle`（选装，发光/弯曲/游戏字更强），失败自动降级不崩溃 |
-| `image_sample` | 8×8 精确像素取样，判断材质/纹理（金属/木纹/织物/皮肤/噪点） |
-| `vision_analyze` | **统一入口（v2.0.0 新增）**：低信息拦截 + 可选像素扫描/OCR/VLM，组合证据返回；VLM 可选配置 |
+| `image_scan` | 全局/区域扫描：颜色网格 + regions 色块 + shade diversity + texture + structure + hue families；支持 `focus`/`region`/`px_per_cell` 定向放大 |
+| `image_ocr` | 文字识别**三引擎**：`windows`（内置）/ `paddle`（选装，发光/弯曲/游戏字更强）/ `rapid`（选装，轻量快速），失败自动降级不崩溃 |
+| `image_sample` | N×N 精确像素取样，判断材质/纹理 |
+| `image_crop` | 按 region 裁剪并导出 PNG |
+| `image_palette` | 颜色提取：主色列表（hex + 命名单 + 占比）+ 色相家族 |
+| `image_compare` | 两图/两区域像素对比：mean_diff / diff_ratio / diff_box / verdict，可选差异可视化预览 |
+| `image_batch` | 批量规模/上下文验证：批量扫描 + 类型判定 + 自动全量 OCR + 是否值得深入建议 |
+| `vision_analyze` | 统一入口：低信息拦截 + 可选像素扫描 / OCR / VLM，按模式路由，返回多路证据 |
 
-### 读图方法论 skill（image-reading）
+### ④ 文档转图片 `document_to_image`
 
-`skills/image-reading.md`（DSH 版）/ `skills/image-reading/SKILL.md`（ZCode 版）是一套**经大量真实图片场景迭代验证**的读图方法论
-（按 experience / skill / principle / insight 分层，教训有据可依、找得到主模型模式），
-安装后模型自动掌握：
-- **hue 场景指纹**：cyan 高=水/雾/湖泊，green 高=森林，orange/red 高=暖色人物/火光，blue 高=夜空科幻，achromatic+rough=废墟，green+yellow=翠绿能量/浮空仙境
-- **多模态模型校验规则**：游戏名/品牌等文字必须 OCR 实读（多模态模型会猜错）；发光元素颜色以 hue 实测为准（多模态模型对发光色的描述系统性不可靠）；低对比主体（暗色人物/小色块）必须放大确认
-- **主动验证**：低对比主体（暗色人物/小色块）必须放大确认
-- **vision_analyze 使用**（v2.0.0）：先 image_scan 自己看，简单图用像素，复杂图再调 VLM；描述与实测冲突时以实测为准
+把 **pdf / docx / doc / xlsx / xls / pptx / ppt** 逐页转成 PNG（LiberOffice headless → PDF → PyMuPDF），供模型逐页 OCR / 扫描分析。纯本地、零网络；支持 `dpi` / `max_pages` / `out_dir` / 批量 `file_paths`。
 
-## 安装
+### ⑤ 外部 VLM 桥（可选）
 
-### DSH 版
+OpenAI 兼容聊天补全端点（LM Studio / llama-server / 云端网关 / GLM-4V-Flash 免费模型），通过 `sendVisionRequest` 以 data URI 送图。**baseURL 自动补 `/v1/chat/completions`**（无需手写完整路径）。受三模式路由约束，隐私模式下即使配置也绝不调用。
+
+### ⑥ 设置卡片「图片阅读」
+
+Web 设置页注册「图片阅读」卡片：使用模式、外部视觉 API、视觉桥模型多选、高级设置（详见「设置卡字段」）。改动写 `~/.dsh/settings.yaml` 即时生效。
+
+### ⑦ 粘贴即用 + 缩略图
+
+开启视觉孪生并选择「(视觉)」模型变体后：粘贴/拖入图片 → 原生缩略图 → 图片块进会话 → 被孪生 `stream` 拦截 → 导出文本路径 + 本地证据 → 纯文本模型拿到结果，可继续用 `image_scan` / `image_ocr` 深挖。
+
+## 与主流多模态插件的差异 / 优势
+
+对比常见方案（`dsh-tool-vision`、`dsh-image-paste`、`dsh-vision-bridge` 等）：
+
+1. **不绑定单一厂商**：视觉孪生对任意 provider 生效（含 `opencode-go` / xiaomi / qiu 等 pi-ai 系），不是只适配某一家 API。
+2. **全链路可离线**：隐私模式零外呼；本地纯 JS 像素工具 + 3 引擎 OCR，不依赖云端。
+3. **工具链完整**：裁剪 / 取色 / 对比 / 批量 / 文档转图，一个插件全覆盖。
+4. **原生缩略图**：真正 DSH 原生图片块（`inputModalities` 声明），非文本路径模拟。
+5. **快**：本地工具毫秒级；可控 VLM 调用（低信息拦截 + 智能模式"值得才调"）省轮数与耗时。
+6. **只写不读 key、隐私硬门禁**：API Key 以 `role:'secret'` 保存、只写不读不回显；隐私模式经 `runtime.js` 强制 `isVlmConfigured()=false`。
+
+| 能力 | **picturereader** | dsh-tool-vision | dsh-image-paste | dsh-vision-bridge |
+|---|---|---|---|---|
+| 原生缩略图（文本模型） | ✅ 视觉孪生 adapter | ❌ | ⚠️ 部分 | ❌ |
+| 任意 provider（含 pi-ai 系） | ✅ | 绑定厂商 | — | — |
+| 隐私模式硬门禁 | ✅ | — | — | ❌ |
+| 本地像素工具链（scan/ocr/crop/palette/compare） | ✅ 全内置 | ⚠️ 基础 | ❌ | ❌ |
+| 文档转图片（pdf/word/excel/ppt） | ✅ | ❌ | ❌ | ❌ |
+| 批量/上下文验证 | ✅ | ❌ | ❌ | ❌ |
+| 外部 VLM 桥（可选，OpenAI 兼容） | ✅ | ✅ | ❌ | ✅ |
+| 全离线可用 | ✅ | ⚠️ | ✅ | ❌ |
+
+## 快速上手
 
 ```sh
-# 1. 插件
-dsh plugin --profile web add picturereader        # 或从源码: dsh plugin --profile web add .
+# 1. 安装插件
+dsh plugin --profile web add picturereader        # npm 包；或从源码: dsh plugin --profile web add .
 dsh plugin --profile headless add picturereader
 
-# 2. 读图方法论 skill（推荐）
-copy skills\image-reading.md %USERPROFILE%\.dsh\skills\   # Windows
-# macOS/Linux: cp skills/image-reading.md ~/.dsh/skills/
+# 2.（推荐）安装读图方法论 skill
+copy skills\image-reading.md %USERPROFILE%\.dsh\skills\          # Windows
+# cp skills/image-reading.md ~/.dsh/skills/                      # macOS / Linux
 
-# 3.（可选）PaddleOCR 增强引擎：node scripts/setup-ocr.mjs
+# 3.（可选）增强 OCR 引擎
+node scripts/setup-ocr.mjs       # PaddleOCR（发光/弯曲/游戏字更强）
+node scripts/setup-rapid.mjs     # RapidOCR（轻量快速）
+
+# 4.（可选）文档转图片依赖（需已装 LibreOffice）
+node scripts/setup-doc-venv.mjs  # 建 doc_venv 装 PyMuPDF
 ```
 
-重启 DSH Desktop 后，模型工具列表出现 `image_scan` / `image_ocr` / `image_sample` / `vision_analyze`，
-技能目录出现 `image-reading`。
+重启 DSH Desktop 后：模型工具列表出现全部工具，设置页出现「图片阅读」卡片。
 
-### ZCode 版
+### 启用视觉孪生（原生缩略图）
 
-ZCode 版位于本仓库的 **[zcode 分支](https://github.com/jing-hy/picturereader/tree/zcode)**。
+1. 在设置页「图片阅读」勾选要作为视觉孪生的文本模型，保存后**重启 DSH**。
+2. 模型选择器中选择对应模型的「(视觉)」变体（如 `deepseek-v4-flash (视觉)`）。
+3. 粘贴 / 拖入图片 → 原生缩略图 → 图片块自动分析为文本证据。
 
-ZCode 版通过 **MCP server**（`mcp/server.js`，stdio）把四个工具暴露给 ZCode，
-读图方法论作为 **skill**（`skills/image-reading/`）随插件分发，业务逻辑 `src/core.js`
-与 DSH 版完全一致。安装：`npm install picturereader-zcode`。
+### 使用示例
 
-## 使用
-
-直接对模型说：
-
-> 用 image_scan 看一下 <路径> 这张图，细看感兴趣的部分
-> （复杂场景可接着用 vision_analyze 获取语义描述并交叉验证）
-
-模型会加载 `image-reading` 方法论自动执行完整流程（定调 → 找主体 → 验证 → 描述）。
-
-### vision_analyze 用法（v2.0.0）
-
-```
-vision_analyze(
-  file_path="C:/shot.png",
-  prompt="描述这个界面，有哪些元素？布局是否正常？",
-  include_scan=true,    # 像素扫描证据（默认 true）
-  include_ocr=true,     # OCR 文字证据（默认 false）
-  include_vlm=true,     # 外部 VLM 语义描述（默认 true，但未配置 SEE_BASE 时自动跳过）
-  allow_low_info=false, # 空白/简单图是否强制调 VLM（默认 false）
-  stop_after=false      # 调用后是否关闭本插件启动的本地服务器
-)
+```text
+用 image_scan 看一下 <路径> 这张图，细看感兴趣的部分
+（复杂场景可接着用 vision_analyze；如有文字先 image_ocr；一批图用 image_batch；
+  文档用 document_to_image 逐页转成图片再看）
 ```
 
-- **先自己看，再决定**：建议先用 `image_scan` 了解图片，简单图用像素就够；复杂/精密场景再开 VLM。
-- **多次提问**：对同一张图换不同 `prompt` 反复调用，从多角度复核。
-- **交叉验证**：VLM 描述与像素/OCR 冲突时，以实测为准。
+## 三模式（使用模式）
 
-## 输出示例
+在 Web 设置 →「图片阅读」卡片顶部选择，修改即时生效。
 
-```
-image: chart.png (600x400 -> 32x21 cells, ~18.8x19px per cell, region=full, palette=full, mode=color)
-shade diversity: 10 distinct shades | texture: smooth 24.2%, medium 19.3%, rough 56.5%
-structure: 6 vertical stripes (4 alternating colors) at cols 4..7; left-right symmetry 45%
-hue families: cyan 88.2%, green 4.5%, yellow 1%          ← 真实主调（colors 灰白占比是假象）
-regions: ...（色块结构）
-colors by area: ...（像素级真实占比）
-luminance grid / color grid
-```
+| 模式 | 是否调用外部视觉 API | 模型行为引导 | 适用场景 |
+|---|---|---|---|
+| **隐私模式** | **绝不调用**（即使配置了 API） | 只走本地工具：image_scan / image_ocr / image_sample / image_crop / image_palette / image_compare | 敏感图片、离线、零外部流量 |
+| **智能模式**（默认） | 允许，但先本地看图再决定 | 先 `image_scan` 快速看，文字→OCR、简单图→本地、复杂图才 `vision_analyze` 外呼 | 日常，省轮数与耗时 |
+| **严谨模式** | 允许 | 自行选择路线 + 多证据交叉验证 + 细看细节 | 需要高准确率与可追溯的场景 |
+
+> 隐私模式约束是 host 侧硬门禁（`runtime.js`）：`isVlmConfigured()` 在此模式下恒返回 `false`，`vision_analyze` 强制 `include_vlm=false`，图片桥引导也明确「只用本地工具」。
+
+## 设置卡字段（图片阅读）
+
+- **使用模式**：隐私 / 智能 / 严谨（`mode`）。
+- **启用外部视觉 API（选配）**：勾选后才显示并允许调用外部视觉端点；不勾选一律走本地，图片绝不外发（`vlm_enabled`）。
+- 勾选后显示：
+  - **视觉 API Base URL**（`vlm_base`，如 `https://api.openai.com/v1` 或 `http://127.0.0.1:1234`；留空=禁用外部 VLM）
+  - **视觉模型**（`vlm_model`）
+  - **视觉 API Key**（`vlm_key`，`password`+`secret`：只写不读，留空保持当前，填写保存即覆盖、不回显）
+  - **Key 环境变量**（`vlm_key_env`，apiKey 为空时回退读取）
+  - **默认 OCR 引擎**（`ocr_engine`：windows / paddle / rapid）
+- **视觉桥模型多选**（`vision_models`）：勾选即生成该模型的「(视觉)」变体；改动需**重启 DSH** 生效；已勾选模型会被兜底并入列表保持打钩，与孪生注入一致。
+- **高级设置**（折叠）：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `vlm_timeout_ms` | `300000` | 外部视觉请求超时（毫秒） |
+| `vlm_max_tokens` | `8192` | 外部视觉最大输出 Tokens |
+| `bridge_export_dir` | 空（系统临时目录） | 图片桥导出目录 |
+| `max_image_bytes` | `52428800` (50MB) | 单张图片读取大小上限（字节） |
+| `scan_default_size` | `32` | image_scan 默认格子大小 |
+| `scan_palette` | `auto` | image_scan 默认色板（auto/full/basic/gray） |
+| `scan_mode` | `auto` | image_scan 默认模式（auto/ascii/color） |
+| `ocr_language` | 空 | OCR 默认语言（BCP-47，如 zh-Hans / en-US） |
+| `multimodal_models` | 空 | 多模态白名单（逗号分隔，这些模型直收图片不降级） |
+| `request_guard` | `true` | 请求保护（llm/stream 最后防线降级 image block） |
+| `batch_probe_first` | `3` | image_batch 探测前几张（判断是否文字密集） |
+| `batch_ocr_limit_chars` | `800` | image_batch 每张 OCR 截断字符数 |
+| `doc_dpi` | `150` | document_to_image 渲染 DPI |
+| `doc_max_pages` | `50` | document_to_image 最大页数 |
+| `debug` | `false` | 调试日志 |
 
 ## 环境变量
 
-### PaddleOCR（可选）
+### OCR（选装）
 
 | 变量 | 默认值 | 作用 |
 |---|---|---|
-| `DSH_PADDLE_PYTHON` | `C:\Users\Administrator\paddle_venv\Scripts\python.exe` | PaddleOCR 解释器路径（与原插件同名，便于直接迁移） |
-| `DSH_PADDLE_CACHE` | `<插件目录>\.paddlex-cache` | PaddleX 模型缓存目录 |
+| `DSH_PADDLE_PYTHON` | `C:\Users\Administrator\paddle_venv\Scripts\python.exe` | PaddleOCR 解释器路径 |
+| `DSH_PADDLE_CACHE` | `D:/coding/picturereader/.paddlex-cache` | PaddleX 模型缓存目录 |
+| `DSH_RAPID_PYTHON` | `C:\Users\Administrator\rapid_venv\Scripts\python.exe` | RapidOCR 解释器路径 |
 
-### 外部视觉 API / VLM（可选，**默认不配置**）
+### 文档转图片（选装）
 
 | 变量 | 默认值 | 作用 |
 |---|---|---|
-| `SEE_BASE` | `（空）` | OpenAI 兼容视觉端点（留空 = VLM 禁用；本地 llama-server / LM Studio / vLLM / 云端网关） |
-| `SEE_MODEL` | `（空）` | 视觉模型名（如 `google/gemma-4-12b-qat`） |
-| `SEE_API_KEY` | `（空）` | API key（本地端点可随便填，云端需要真实 key） |
-| `SEE_SERVER_EXE` / `SEE_SERVER_MODEL` / `SEE_SERVER_MMPROJ` | `（空）` | 本地 llama-server 自启路径（可选，配置后插件可自动拉起本地视觉服务器） |
-| `SEE_SERVER_PORT` / `SEE_SERVER_NGL` / `SEE_SERVER_CTX` | `8080` / `20` / `16384` | 本地服务器参数 |
+| `DSH_SOFFICE` | `C:/Program Files/LibreOffice/program/soffice.exe` | LibreOffice headless 可执行路径 |
+| `DSH_DOC_PYTHON` | `C:\Users\Administrator\doc_venv\Scripts\python.exe` | 文档转换 venv 解释器路径（PyMuPDF） |
 
-> **VLM 配置说明**：默认不配置 VLM，`vision_analyze` 会跳过 VLM 调用，只返回像素扫描和 OCR 证据（保持零外部依赖）。需要语义理解时，设置 `SEE_BASE` + `SEE_MODEL` 即可，例如指向本地 LM Studio（`http://127.0.0.1:1234/v1`）。
+### 外部视觉 API / VLM（可选，也可在设置卡填）
 
-## 开发
+| 变量 | 默认值 | 作用 |
+|---|---|---|
+| `SEE_API_KEY` / `GLM_API_KEY` | 空 | 视觉 API Key（设置卡 `vlm_key` 优先级更高） |
+| `SEE_BASE` | 智谱或设置卡 `vlm_base` | OpenAI 兼容视觉端点 |
+| `SEE_MODEL` | `glm-4v-flash` 或设置卡 `vlm_model` | 视觉模型名 |
+| `SEE_SERVER_EXE / MODEL / MMPROJ` | 空 | 本地 llama-server 自启路径（可选） |
+| `SEE_SERVER_PORT / NGL / CTX` | `8080 / 20 / 16384` | 本地服务器参数 |
+
+> 设置卡 `vlm_base / vlm_model / vlm_key` 优先于环境变量；隐私模式下即使配置也**不调用**。端点未写 `/v1` 时自动补 `/v1/chat/completions`。
+
+## 已知限制
+
+- **DSH attachment 单图默认约 5MB**：超大图片可能被宿主上传限制拦截；工具端的 `max_image_bytes`（默认 50MB）是读取上限。
+- **原生缩略图需启用视觉孪生**：文本模型默认不被 DSH 视为「支持图片」，需在设置卡勾选生成「(视觉)」变体并重启。
+- **WebP 暂不支持**：`image_scan` / `vision_analyze` 等对 WebP 报错，请先转成 PNG / JPEG。
+- **视觉桥模型勾选需重启 DSH** 生效（`vision_models` 的改动不会热加载）。
+- **`dsh-file-drop` 需停用**：其「拖入图片即注入文本」与视觉孪生/图片桥的自动分析可能冲突（重复/竞争注入），建议在对应 profile 停用；原生缩略图 + 图片桥自动分析已覆盖该需求。
+- **外部 VLM 依赖网络/端点**：未配置端点或离线时自动跳过并给出提示；隐私模式恒不调用。
+
+## 测试情况
+
+内置 `node:test` 单测（工具、三模式、桥）+ 真实素材集成测试通过：本地工具链、文档转图片（pdf/docx/pptx/xlsx）、外部 VLM 真调通路（LM Studio）、三模式路由、视觉孪生 Proxy 均验证通过（24/24）。
+
+## 开发 / 仓库布局
 
 ```sh
-# DSH 版（本仓库）
+# DSH 版（本仓库 main，代码在 dsh/）
 npm install
-npm test            # node:test
-node scripts/setup-ocr.mjs   # 可选：装 PaddleOCR
-node scripts/preview.mjs     # 生成 fixtures 并预览渲染
-
-# ZCode 版（本仓库 zcode 分支）
-git checkout zcode
-npm install
-npm test            # node:test
-node scripts/setup-ocr.mjs   # 可选
+npm test                       # node:test
+node scripts/setup-ocr.mjs     # 可选
+node scripts/setup-rapid.mjs   # 可选
+node scripts/setup-doc-venv.mjs# 可选（文档转换）
+node scripts/preview.mjs       # 生成 fixtures 并预览渲染
 ```
 
-**热插拔（DSH 版）**：DSH 本身不支持代码热重载，但本插件自带执行层热加载——业务逻辑全在
-`src/core.js` 单文件，工具每次执行按 mtime 动态加载（cache-bust），**改 core.js
-下次调用即生效**；工具定义（schema/描述）改动需重启桌面端。
-
-**热插拔（ZCode 版）**：MCP server 从所选目录运行，改 `src/core.js` 下次调用即生效
-（详见 zcode 分支 README）。
-
-## 优势
-
-- **一个插件全包含，无需另装**：独立的伪多模态识图 + 可选外部视觉 API，融合在一个包里，不需要再装 `dsh-universal-vision` 或其他任何读图插件
-- **核心链路零外部依赖**：扫描/取样/解码纯本地纯 JS，不调任何视觉 API；语义理解要么交给主模型，要么按需桥接你自己的 VLM
-- **双版本独立分发，互不污染**：DSH 用 `picturereader`（本页），ZCode 用 `picturereader-zcode`（zcode 分支）；DSH 版带 `dsh.bundle`、ZCode 版带 `mcp` + `.zcode-plugin`，各装各的宿主，**不会把 ZCode 版误装进 DSH，也不会把 DSH 版误装进 ZCode**
-- **外部 API 可选、即插即用**：默认不配置 `SEE_BASE` 保持纯本地；配了即接入语义理解，本地 llama-server / LM Studio / vLLM / 云端 OpenAI 兼容端点通吃
-- **低信息量拦截**（v2.0.0）：自动识别空白/未渲染/简单图，避免小 VLM 幻觉、省调用成本
-- **证据交叉验证**（v2.0.0）：VLM 描述与像素/OCR 实测冲突时以实测为准——伪多模态与真 VLM 互为印证，抑制幻觉
-- **多次提问**（v2.0.0）：同一张图可换不同 `prompt` 反复 `vision_analyze`，从多角度复核
-- **可追溯、可验证**：每个结论都有数据支撑（hue 占比、色块坐标、OCR 文本+置信度）
-- **成本低**：一次扫描 ≈0.6–2.2K tokens；PaddleOCR 本地跑，无 API 费用
-- **方法论沉淀**：附带的 image-reading skill 把读图经验固化（场景指纹/校验规则），模型每次看图都带着经过大量图片验证的经验
+- **热插拔**：业务逻辑集中在 `src/core.js` 单文件，工具每次执行按 mtime 动态加载；工具定义（schema/描述）与设置卡改动需重启桌面端。
+- **ZCode 版**：位于本仓库 [zcode 分支](https://github.com/jing-hy/picturereader/tree/zcode)（源码在 `zcode/`），经 MCP server 暴露工具，安装 `npm install picturereader-zcode`。两版共用 `src/core.js` 与读图方法论 skill。
 
 ## License
 

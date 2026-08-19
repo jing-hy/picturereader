@@ -1,17 +1,19 @@
 {
     "name":  "picturereader",
-    "version":  "2.0.1",
-    "description":  "Unified image understanding plugin for DeepSeek Harness (DSH). Fuses frame-free pseudo-multimodal reading (pixel scan + OCR + sample) with an optional external vision API bridge (local llama-server / LM Studio / any OpenAI-compatible endpoint) for full semantic understanding. No extra plugin needed.",
+    "version":  "3.0.0",
+    "description":  "Unified image understanding plugin for DeepSeek Harness (DSH). Visual twin adapter for native thumbnails + auto-analysis on any text-only model (incl. pi-ai providers); privacy/smart/strict routing; local tools (scan/OCR×3 engines/crop/palette/compare/batch); document-to-image (pdf/word/excel/ppt); optional external VLM bridge.",
     "type":  "module",
     "main":  "src/index.js",
     "exports":  {
                     ".":  "./src/index.js",
+                    "./client":  "./client.js",
                     "./cordis.patch.yml":  "./cordis.patch.yml",
                     "./package.json":  "./package.json"
                 },
     "files":  [
                   "src",
                   "scripts",
+                  "client.js",
                   "cordis.patch.yml",
                   "skills",
                   "README.md",
@@ -30,11 +32,13 @@
                      "ascii",
                      "ocr",
                      "paddleocr",
+                     "rapidocr",
                      "hue",
                      "multimodal",
                      "vlm",
                      "vision-analyze",
-                     "llm-vision"
+                     "llm-vision",
+                     "document-to-image"
                  ],
     "license":  "MIT",
     "author":  "picturereader",
@@ -44,8 +48,16 @@
     "dsh":  {
                 "bundle":  {
                                "patch":  "./cordis.patch.yml"
+                           },
+                "client":  {
+                               "platform":  "web"
                            }
             },
+    "peerDependencies":  {
+                             "@deepseek-ai/dsh-settings":  "^0.1.0-rc.6",
+                             "@deepseek-ai/schemastery":  "^3.18.1",
+                             "@deepseek-ai/dsh-llm":  "*"
+                         },
     "dependencies":  {
                          "jpeg-js":  "^0.4.4",
                          "omggif":  "^1.0.10",

@@ -1102,8 +1102,9 @@ export function runOcr(pngPath, { language } = {}) {
  * @param buffer - raw image bytes.
  * @param ext - lowercase extension ('.png' etc.).
  * @param options - `{ region, language, engine }`. engine: 'windows'
- *   (Windows.Media.Ocr, default) or 'paddle' (PaddleOCR via the local
- *   paddle_venv — far better at glowing/curved/game-rendered text).
+ *   (Windows.Media.Ocr, default), 'paddle' (PaddleOCR via the local
+ *   paddle_venv) or 'rapid' (RapidOCR via the local rapid_venv) — Paddle and
+ *   Rapid are far better at glowing/curved/game-rendered text.
  * @returns `{ width, height, lines }`.
  */
 export async function ocrImage(buffer, ext, { region, language, engine = 'windows' } = {}) {
@@ -1126,6 +1127,10 @@ export async function ocrImage(buffer, ext, { region, language, engine = 'window
   try {
     if (engine === 'paddle') {
       const result = await runPaddleOcr(tmpPath);
+      return { width: work.width, height: work.height, lines: result.lines };
+    }
+    if (engine === 'rapid') {
+      const result = await runRapidOcr(tmpPath);
       return { width: work.width, height: work.height, lines: result.lines };
     }
     return await runOcr(winPath, { language });
@@ -1220,6 +1225,93 @@ export function runPaddleOcr(pngPath) {
         resolve({ lines: parsed.lines ?? [] });
       } catch (error) {
         reject(new Error(`image_ocr: cannot parse PaddleOCR result: ${error.message}`));
+      }
+    });
+  });
+}
+
+/** Absolute path to the local RapidOCR environment (rapid_venv); overridable via DSH_RAPID_PYTHON. */
+export function rapidPython() {
+  return process.env.DSH_RAPID_PYTHON ?? 'C:/Users/Administrator/rapid_venv/Scripts/python.exe';
+}
+
+/**
+ * Whether the optional RapidOCR environment is available. RapidOCR is an
+ * OPTIONAL engine: when it is missing, callers must degrade gracefully to the
+ * Windows engine instead of failing.
+ * @param python - python executable to probe (defaults to the configured path).
+ * @returns true when the interpreter exists AND `rapidocr_onnxruntime` imports.
+ */
+export async function rapidAvailable(python = rapidPython()) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const child = spawn(python, ['-c', 'import rapidocr_onnxruntime'], {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      windowsHide: true,
+      stdio: 'ignore'
+    });
+    const timer = setTimeout(() => { child.kill(); finish(false); }, 30_000);
+    child.on('error', () => finish(false));
+    child.on('close', (code) => finish(code === 0));
+  });
+}
+
+/**
+ * Run RapidOCR on a PNG file via the local rapid_venv. Uses the bundled
+ * det/rec/cls ONNX models (no network download on first run — verified on
+ * rapidocr_onnxruntime 1.2.3). Better than Windows OCR for glowing, curved,
+ * or game-rendered text.
+ * @param pngPath - absolute path to the PNG (forward slashes recommended).
+ * @returns `{ lines: [{ text, score, x, y, width, height }] }` (box aggregated).
+ */
+export function runRapidOcr(pngPath) {
+  const script = [
+    'import json, sys',
+    'from rapidocr_onnxruntime import RapidOCR',
+    '_engine = RapidOCR()',
+    '_result, _elapse = _engine(sys.argv[1])',
+    '_out = []',
+    'for _it in (_result or []):',
+    '    _pts = [[float(c) for c in _p] for _p in _it[0]]',
+    '    _xs = [_p[0] for _p in _pts]; _ys = [_p[1] for _p in _pts]',
+    "    _out.append({'text': _it[1], 'score': float(_it[2]), 'x': int(min(_xs)), 'y': int(min(_ys)), 'width': int(max(_xs)-min(_xs)), 'height': int(max(_ys)-min(_ys))})",
+    "print(json.dumps({'lines': _out}, ensure_ascii=False), flush=True)"
+  ].join('\n');
+  return new Promise((resolve, reject) => {
+    const child = spawn(rapidPython(), ['-c', script, String(pngPath)], {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('image_ocr: RapidOCR timed out after 60s'));
+    }, 60_000);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(new Error(`image_ocr: cannot start RapidOCR: ${error.message}`));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        const tail = stderr.trim().split('\n').filter((l) => l.includes('Error') || l.includes('error') || l.includes('Traceback')).slice(-3).join(' | ') || stderr.trim().slice(-200);
+        reject(new Error(`image_ocr: RapidOCR failed (exit ${code}): ${tail}`));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        resolve({ lines: parsed.lines ?? [] });
+      } catch (error) {
+        reject(new Error(`image_ocr: cannot parse RapidOCR result: ${error.message}`));
       }
     });
   });

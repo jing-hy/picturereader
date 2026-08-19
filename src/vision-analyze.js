@@ -21,7 +21,9 @@
 import { extname } from 'node:path';
 import { BYTE_CAP, MAX_PIXELS } from './tool.js';
 import { isLowInformationImage } from './guard.js';
-import { ensureServer, stopServer, sendVisionRequest, defaultVlmConfig, isVlmConfigured } from './vlm.js';
+import { ensureServer, stopServer, sendVisionRequest, defaultVlmConfig, isVlmConfigured, DEFAULT_BASE, DEFAULT_API_KEY } from './vlm.js';
+import { getRuntimeConfig } from './runtime.js';
+import { visionAnalyzeDefaults, isPrivacy, routePolicyText } from './routing.js';
 
 const CORE_URL = new URL('./core.js', import.meta.url).href;
 let coreCache = { url: null, mtime: -1, module: null };
@@ -94,8 +96,8 @@ export function createVisionAnalyzeTool(ctx) {
         },
         ocr_engine: {
           type: 'string',
-          enum: ['windows', 'paddle'],
-          description: 'OCR engine: windows (default) or paddle (better for glowing/curved/game text).'
+          enum: ['windows', 'paddle', 'rapid'],
+          description: 'OCR engine: windows (default), paddle or rapid (see image_ocr for details).'
         },
         include_vlm: {
           type: 'boolean',
@@ -168,15 +170,23 @@ export function createVisionAnalyzeTool(ctx) {
         );
       }
 
-      const includeScan = args.include_scan === undefined ? true : boolArg(args.include_scan, true);
-      const includeOcr = args.include_ocr === undefined ? false : boolArg(args.include_ocr, false);
-      const includeVlm = args.include_vlm === undefined ? true : boolArg(args.include_vlm, true);
+      const rt = getRuntimeConfig();
+      const mode = rt?.mode ?? 'smart';
+      const defaults = visionAnalyzeDefaults(mode);
+      const privacy = isPrivacy(mode);
+      const includeScan = args.include_scan === undefined ? defaults.includeScan : boolArg(args.include_scan, true);
+      const includeOcr = args.include_ocr === undefined ? defaults.includeOcr : boolArg(args.include_ocr, false);
+      // privacy 硬 gate：不管 include_vlm 传什么、外部是否配置，一律不调用 VLM。
+      const includeVlm = privacy ? false : (args.include_vlm === undefined ? defaults.includeVlm : boolArg(args.include_vlm, true));
       const allowLowInfo = boolArg(args.allow_low_info, false);
       const stopAfter = boolArg(args.stop_after, false);
       const prompt = args.prompt ?? 'Describe this image in detail.';
 
-      // Check if VLM is configured
-      const vlmAvailable = isVlmConfigured();
+      // 当前模式的调用策略，注入到返回文本里给主模型做路由引导。
+      const modePolicy = routePolicyText(mode, { vlmConfigured: isVlmConfigured() });
+
+      // Check if VLM is configured (privacy 下恒不可用)
+      const vlmAvailable = privacy ? false : isVlmConfigured();
       const shouldCallVlm = includeVlm && vlmAvailable;
 
       const lowInfo = isLowInformationImage(image.data, image.width, image.height);
@@ -194,11 +204,12 @@ export function createVisionAnalyzeTool(ctx) {
       }
 
       if (includeScan) {
+        const rtScan = rt?.scan || {};
         const analysis = core.analyzeImage(image.data, image.width, image.height, {
-          size: 32,
-          mode: 'auto',
+          size: rtScan.defaultSize || 32,
+          mode: rtScan.mode || 'auto',
           region: undefined,
-          palette: 'auto'
+          palette: rtScan.palette || 'auto'
         });
         scanText = core.renderImageScan({
           path: target.displayPath,
@@ -242,11 +253,22 @@ export function createVisionAnalyzeTool(ctx) {
           }
         }
       } else if (includeVlm && !vlmAvailable) {
-        blocks.push('[vlm] VLM 未配置（SEE_BASE 环境变量为空）');
+        const hasBase = DEFAULT_BASE.length > 0;
+        const hasKey = DEFAULT_API_KEY.length > 0;
+        if (hasBase && !hasKey) {
+          blocks.push('[vlm] VLM 未就绪：已配置端点但缺少 API key。\n' +
+            '要使用免费的 GLM-4V-Flash 视觉模型，请：\n' +
+            '1. 访问 https://open.bigmodel.cn 注册智谱账号\n' +
+            '2. 获取 API Key\n' +
+            '3. 设置环境变量：GLM_API_KEY=你的key 或 SEE_API_KEY=你的key\n' +
+            '4. 重启 DSH 生效');
+        } else {
+          blocks.push('[vlm] VLM 未配置（SEE_BASE 环境变量为空）');
+        }
       }
 
       ctx.emit('fs/observed', target, { kind: 'present', version: info.version }, exec);
-      const combined = blocks.join('\n\n---\n\n');
+      const combined = [modePolicy, ...blocks].join('\n\n---\n\n');
       return {
         path: target.displayPath,
         lowInformation: false,
