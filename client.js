@@ -214,11 +214,49 @@ window.__ModuleLoader__.load({
       var [available, setAvailable] = react.useState([]);
       // vision_models (user-selected, saved to settings)
       var [selected, setSelected] = react.useState([]);
+      // Flag to prevent scope sync from overwriting local edits
+      var editingRef = react.useRef(false);
+      var editTimerRef = react.useRef(null);
 
-      // Load available models from host API + current selection from settings
+      // Sync selected from scope: subscribe + load on mount
       react.useEffect(function () {
         var alive = true;
-        // Fetch available text models from host API (independent of settings.yaml)
+        var lastSavedRef = null; // Track last saved value to prevent overwrite
+        function syncFromScope() {
+          if (!alive) return;
+          var snap = scope.getSnapshot();
+          if (snap.status === "ready" && snap.value) {
+            var sel = snap.value.vision_models;
+            if (Array.isArray(sel)) {
+              // If we just saved and the value matches what we saved, skip
+              if (lastSavedRef && JSON.stringify(sel) === JSON.stringify(lastSavedRef)) {
+                lastSavedRef = null;
+                return;
+              }
+              setSelected(sel);
+            }
+          }
+        }
+        // Initial load from server
+        scope.load().then(function () {
+          if (alive) syncFromScope();
+        }).catch(function () {});
+        // Subscribe to scope changes (triggers after save)
+        var unsubscribe = typeof scope.subscribe === "function" ? scope.subscribe(function () {
+          if (alive) syncFromScope();
+        }) : null;
+        // Expose lastSavedRef for saveSelection
+        VisionBridgePicker._lastSavedRef = function(val) { lastSavedRef = val; };
+        return function () {
+          alive = false;
+          if (unsubscribe) unsubscribe();
+          VisionBridgePicker._lastSavedRef = null;
+        };
+      }, [scope]);
+
+      // Load available models from host API
+      react.useEffect(function () {
+        var alive = true;
         function fetchModels() {
           fetch('/picturereader/models')
             .then(function (res) { return res.ok ? res.json() : []; })
@@ -227,25 +265,22 @@ window.__ModuleLoader__.load({
             })
             .catch(function () {});
         }
-        // Load user selection from settings
-        function loadSelection() {
-          scope.load().then(function () {
-            if (!alive) return;
-            var snap = scope.getSnapshot();
-            if (snap.status !== "ready" || !snap.value) return;
-            var sel = snap.value.vision_models;
-            if (Array.isArray(sel)) setSelected(sel);
-          }).catch(function () {});
-        }
         fetchModels();
-        loadSelection();
         // Poll every 5s for model list updates (host scans async)
-        var timer = setInterval(function () { fetchModels(); loadSelection(); }, 5000);
+        var timer = setInterval(function () { fetchModels(); }, 5000);
         return function () { alive = false; clearInterval(timer); };
-      }, [scope]);
+      }, []);
+
+      // Mark editing to prevent scope sync from overwriting
+      function markEditing() {
+        editingRef.current = true;
+        if (editTimerRef.current) clearTimeout(editTimerRef.current);
+        editTimerRef.current = setTimeout(function () { editingRef.current = false; }, 2000);
+      }
 
       // Toggle a model on/off
       function toggleModel(model) {
+        markEditing();
         var idx = selected.findIndex(function (m) { return m.id === model.id && m.provider === model.provider; });
         var next;
         if (idx >= 0) {
@@ -259,6 +294,7 @@ window.__ModuleLoader__.load({
 
       // Update note for a selected model
       function setNote(model, note) {
+        markEditing();
         var next = selected.map(function (m) {
           if (m.id === model.id && m.provider === model.provider) return Object.assign({}, m, { note: note });
           return m;
@@ -268,7 +304,14 @@ window.__ModuleLoader__.load({
       }
 
       function saveSelection(list) {
-        scope.set("vision_models", list).catch(function () {});
+        console.log('[picturereader] saveSelection called with', list.length, 'models:', JSON.stringify(list.map(function(m) { return m.id; })));
+        // Track last saved value to prevent scope sync from overwriting
+        if (VisionBridgePicker._lastSavedRef) VisionBridgePicker._lastSavedRef(list);
+        scope.set("vision_models", list).then(function () {
+          console.log('[picturereader] vision_models saved successfully');
+        }).catch(function (err) {
+          console.error('[picturereader] vision_models save failed:', err);
+        });
       }
 
       var isSelected = function (m) {
@@ -384,6 +427,12 @@ window.__ModuleLoader__.load({
           // their boolean so an untouched "false" is not coerced to true.
           if (f.type === "checkbox") {
             ops.push({ op: "set", key: f.key, value: draft[f.key] !== void 0 ? !!draft[f.key] : Boolean(value[f.key]) });
+            return;
+          }
+          // For select fields (mode, ocr_engine), use draft value if touched, otherwise use current value
+          if (f.type === "mode" || f.type === "ocr") {
+            var selectVal = draft[f.key] !== void 0 ? draft[f.key] : (value[f.key] || (f.type === "mode" ? "smart" : "windows"));
+            if (selectVal) ops.push({ op: "set", key: f.key, value: selectVal });
             return;
           }
           var dv = fieldValue(f);

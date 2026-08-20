@@ -1,6 +1,6 @@
 # picturereader
 
-> **v3.0.1** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
+> **v3.0.3** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
 > 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）与**可选外部 VLM 桥**。一个插件全包，无需另装。
 
 [![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
@@ -257,7 +257,34 @@ node scripts/setup-doc-venv.mjs  # 建 doc_venv 装 PyMuPDF
 
 ## 测试情况
 
-内置 `node:test` 单测（工具、三模式、桥）+ 真实素材集成测试通过：本地工具链、文档转图片（pdf/docx/pptx/xlsx）、外部 VLM 真调通路（LM Studio）、三模式路由、视觉孪生 Proxy 均验证通过（24/24）。
+### v3.0.3 集成测试（2026-08-20）
+
+132/132 单元测试通过 + 13/13 文档转换测试通过 + 全功能集成测试：
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| image_scan | ✅ | 4 种格式、region/focus/px_per_cell/palette/mode 全部正确 |
+| image_ocr (windows) | ✅ | 中英文识别正常 |
+| image_ocr (rapid) | ✅ | 带 confidence score |
+| image_ocr (paddle) | ✅ | v3.0.3 修复字段名后正常 |
+| image_sample | ✅ | 8×8 精确像素取样 |
+| image_crop | ✅ | 裁剪导出 PNG |
+| image_palette | ✅ | 主色提取 + hue families |
+| image_compare | ✅ | 相同/不同图片判定正确 |
+| image_batch | ✅ | v3.0.3 修复 cordis inject 后正常 |
+| document_to_image | ✅ | PDF/DOCX/PPTX/XLSX 全部正常 |
+| vision_analyze (本地) | ✅ | scan + OCR 证据返回正常 |
+| 三模式路由 | ✅ | privacy/smart/strict 逻辑全部正确 |
+| 视觉孪生 adapter | ✅ | 3 个 provider 激活 |
+| 设置持久化 | ✅ | vision_models / ocr_engine / mode 全部保留 |
+
+### v3.0.3 修复
+
+- **视觉桥模型列表持久化修复**：修复了设置页「视觉桥模型」勾选后重新打开设置丢失勾选状态的问题。根因是 `settings/document-updated` 事件触发 `scope.load()` 覆盖本地修改，改为通过 `lastSavedRef` 跟踪保存值，跳过同步覆盖。
+- **OCR 引擎/模式设置持久化修复**：修复了 `ocr_engine` 和 `mode` 等 select 字段修改后重新打开设置恢复默认的问题。根因是 `onSave` 函数未正确处理 select 类型字段的默认值回退。
+- **cordis 4 兼容性修复**：修复了 `image-batch.js` 和 `doc-tools.js` 中访问未声明 `ctx` 属性导致的报错。
+- **PaddleOCR 字段名修复**：`w/h` 字段改为 `width/height` 以匹配 schema。
+- **本地 VLM 端点检测修复**：`isManagedEndpoint` 扩展为识别所有 `127.0.0.1`/`localhost` 地址，不再要求 API key。
 
 ## 开发 / 仓库布局
 
