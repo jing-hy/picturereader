@@ -1,0 +1,401 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260820T075826747Z-41756-a0dcae1a56d3",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "candidate-select",
+      "target": "runtime.js",
+      "reason": "changed_file_unreadable: observed changed file no longer exists or cannot be read"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 19,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 9
+    },
+    "change_tracking": {
+      "touched_observed": 10,
+      "touched_retained": 10,
+      "truncated": false,
+      "bash_mutation": false,
+      "bash_discovered": 0,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 9,
+      "selected_files": 9,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 8,
+      "scanned_files": 8,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 1,
+      "project_checks_completed": 1
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "changed_file_unreadable": 1,
+      "project_check_failed": 1
+    },
+    "reasons": [
+      {
+        "code": "changed_file_unreadable",
+        "stage": "candidate-select",
+        "target": "runtime.js",
+        "detail": "observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "candidate-select",
+        "target": "runtime.js",
+        "detail": "changed_file_unreadable: observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-08-20T07:58:26.747Z",
+  "session_id": "sess_db51dbc8-873c-4925-8401-712094563ddf",
+  "target": ".",
+  "revision": "bb4d60cec5decf26b7fef3253132dbca666e7c5a",
+  "rules_version": "unavailable",
+  "diff_hash": "f325557ab3f9eb2638c32346911056939057d4dce5b7b458515767a7b4fa58af",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 9,
+    "changed_files": [
+      {
+        "file": "package.json",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 4
+          },
+          {
+            "start": 23,
+            "end": 25
+          },
+          {
+            "start": 36,
+            "end": 36
+          },
+          {
+            "start": 42,
+            "end": 43
+          }
+        ],
+        "before_hash": "e9dd92ca76e1b37f9bd0914dfda2c4a2f40a334e6329e82686e8c15dfda8edfc",
+        "after_hash": "e4cae7028d781f4ff3818fc9693d892951e3e9d617c1c01e2c3b156375695bc7"
+      },
+      {
+        "file": "src/config.js",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 70
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "2a7cc7da39d7e9500172d8d0ae5a7f128692fa6e6ccee9ea6d835b24fcf976d2"
+      },
+      {
+        "file": "src/core.js",
+        "ranges": [
+          {
+            "start": 1105,
+            "end": 1107
+          },
+          {
+            "start": 1132,
+            "end": 1135
+          },
+          {
+            "start": 1289,
+            "end": 1375
+          }
+        ],
+        "before_hash": "1958ed26b6454bca1310d59afc7a39048ed44c4b908d8fa1c86c4716ec18d24c",
+        "after_hash": "f81a48251c8f769cb67701f4d96a4ff8865b29598d3a80757668436072f8612f"
+      },
+      {
+        "file": "src/index.js",
+        "ranges": [
+          {
+            "start": 2,
+            "end": 2
+          },
+          {
+            "start": 4,
+            "end": 17
+          },
+          {
+            "start": 24,
+            "end": 27
+          },
+          {
+            "start": 34,
+            "end": 38
+          },
+          {
+            "start": 44,
+            "end": 48
+          }
+        ],
+        "before_hash": "accf987776d8e6ba90ddfc49e586667f27f5e2fe7defa6f9a0b1459b1211f348",
+        "after_hash": "3c5029d64d4a8044812dec854f880f5e9965b969dbba3e4b481c5e7d72ab6d57"
+      },
+      {
+        "file": "src/routing.js",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 130
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "f18bdbd9159d6bfb3623c4c722bad2b4565bea31c9b845b7901982e9fd725cfe"
+      },
+      {
+        "file": "src/runtime.js",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 127
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "f9aaa0843c49a603ae52fe7e4a5c83f66762b863b53dc624c3bb4335422776da"
+      },
+      {
+        "file": "src/tool.js",
+        "ranges": [
+          {
+            "start": 258,
+            "end": 260
+          },
+          {
+            "start": 287,
+            "end": 288
+          },
+          {
+            "start": 302,
+            "end": 302
+          },
+          {
+            "start": 352,
+            "end": 353
+          },
+          {
+            "start": 390,
+            "end": 395
+          },
+          {
+            "start": 398,
+            "end": 399
+          },
+          {
+            "start": 401,
+            "end": 401
+          },
+          {
+            "start": 411,
+            "end": 411
+          },
+          {
+            "start": 413,
+            "end": 413
+          }
+        ],
+        "before_hash": "0271cf8394328a487dc907c2939cfcbf9671ef0a520bd5bcab07f42290a15db5",
+        "after_hash": "9f3ac085b01e0aa4d3ffce8afdf0061749096470a5d24266819c461f1c065ad2"
+      },
+      {
+        "file": "src/vision-analyze.js",
+        "ranges": [
+          {
+            "start": 24,
+            "end": 26
+          },
+          {
+            "start": 99,
+            "end": 100
+          },
+          {
+            "start": 173,
+            "end": 180
+          },
+          {
+            "start": 185,
+            "end": 189
+          },
+          {
+            "start": 207,
+            "end": 207
+          },
+          {
+            "start": 209,
+            "end": 210
+          },
+          {
+            "start": 212,
+            "end": 212
+          },
+          {
+            "start": 256,
+            "end": 267
+          },
+          {
+            "start": 271,
+            "end": 271
+          }
+        ],
+        "before_hash": "0b3c8c31927953d601250cbaf2e244e72aca374b76505a7362a7efd431904306",
+        "after_hash": "8bce4b1b6dcccbbb699cb2cbbddd0219cb385d7d0b34c520a67a56e58e3508f5"
+      },
+      {
+        "file": "src/vlm.js",
+        "ranges": [
+          {
+            "start": 16,
+            "end": 16
+          },
+          {
+            "start": 80,
+            "end": 131
+          },
+          {
+            "start": 133,
+            "end": 143
+          },
+          {
+            "start": 146,
+            "end": 146
+          },
+          {
+            "start": 148,
+            "end": 148
+          },
+          {
+            "start": 161,
+            "end": 163
+          },
+          {
+            "start": 169,
+            "end": 195
+          },
+          {
+            "start": 198,
+            "end": 205
+          },
+          {
+            "start": 386,
+            "end": 396
+          },
+          {
+            "start": 422,
+            "end": 422
+          },
+          {
+            "start": 424,
+            "end": 426
+          },
+          {
+            "start": 435,
+            "end": 436
+          }
+        ],
+        "before_hash": "61c1bccc42c7fb9ad786bbadbf9bec61287d26872439be2a73e4a57ad34e8307",
+        "after_hash": "9748ef7d96f99cda7628658ce00cd958acbe37ba48c78784ad59969e5ae7b767"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-08-20T07:58:25.210Z",
+    "completed_at": "2026-08-20T07:58:26.747Z",
+    "duration_ms": 1537,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 1537,
+    "peakMemoryBytes": 143581184,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 8,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [
+    {
+      "finding_id": "mimosa-393ed7fd245c66c27a427e91",
+      "file": "src/vlm.js",
+      "line": 309,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-08-20T07:48:26.984Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "863d6acdc8d12ec41688c0d68b7c5dfb925d7ebc7c681fb00134bf7256f430ea",
+        "runtime_oracle": false
+      }
+    }
+  ],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_db51dbc8-873c-4925-8401-712094563ddf-20260820T075826747Z-41756-a0dcae1a56d3.json",
+    "latest_report": ".mimosa/reports/task-review-sess_db51dbc8-873c-4925-8401-712094563ddf.json",
+    "history_summary": ".mimosa/history/run-20260820T075826747Z-41756-a0dcae1a56d3.json"
+  }
+}

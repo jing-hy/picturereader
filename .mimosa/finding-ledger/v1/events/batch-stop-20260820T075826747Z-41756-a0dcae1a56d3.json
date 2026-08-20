@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260820T075826747Z-41756-a0dcae1a56d3",
+  "runId": "20260820T075826747Z-41756-a0dcae1a56d3",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "changed_file_unreadable",
+        "stage": "candidate-select",
+        "target": "runtime.js",
+        "detail": "observed changed file no longer exists or cannot be read",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "candidate-select",
+        "target": "runtime.js",
+        "detail": "changed_file_unreadable: observed changed file no longer exists or cannot be read",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "bb4d60cec5decf26b7fef3253132dbca666e7c5a",
+  "diffHash": "f325557ab3f9eb2638c32346911056939057d4dce5b7b458515767a7b4fa58af",
+  "rulesVersion": "unavailable",
+  "sessionHash": "d05e1e88e09fb438ffcf79eb8474ef493524ba2424a4961d730aa88485c0fe12",
+  "reportRef": ".mimosa/reports/task-review-sess_db51dbc8-873c-4925-8401-712094563ddf-20260820T075826747Z-41756-a0dcae1a56d3.json",
+  "events": [
+    {
+      "eventId": "hook-79243c27a9e1d7c4e51ffed3eaa5a09e",
+      "findingId": "mimosa-393ed7fd245c66c27a427e91",
+      "type": "finding_blocked",
+      "at": "2026-08-20T07:48:26.984Z",
+      "identity": {
+        "projectRelativeFile": "src/vlm.js",
+        "ruleId": "security",
+        "codeEvidenceHash": "863d6acdc8d12ec41688c0d68b7c5dfb925d7ebc7c681fb00134bf7256f430ea",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 309,
+      "endLine": 309,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "863d6acdc8d12ec41688c0d68b7c5dfb925d7ebc7c681fb00134bf7256f430ea"
+      },
+      "sequence": 0
+    }
+  ],
+  "observedFindingIds": [
+    "mimosa-393ed7fd245c66c27a427e91"
+  ],
+  "verifiedFiles": [
+    {
+      "file": "src/config.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/routing.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/runtime.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/core.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/tool.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/vlm.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/vision-analyze.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/index.js",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-08-20T07:58:27.056Z"
+}

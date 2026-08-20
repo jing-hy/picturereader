@@ -25,7 +25,6 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { isLowInformationImage } from '../src/guard.js';
 import { ensureServer, stopServer, sendVisionRequest, defaultVlmConfig, isVlmConfigured } from '../src/vlm.js';
-import { executeCrop, executePalette, executeCompare, executeBatch } from './new-tools.js';
 
 /** The MCP protocol version this server speaks. */
 export const PROTOCOL_VERSION = '2025-06-18';
@@ -221,8 +220,8 @@ export async function executeOcr(args) {
     throw new Error('image_ocr: language must be a non-empty BCP-47 tag');
   }
   const engine = args.engine === undefined ? 'windows' : String(args.engine);
-  if (engine !== 'windows' && engine !== 'paddle' && engine !== 'rapid') {
-    throw new Error("image_ocr: engine must be 'windows' (default) or 'paddle' or 'rapid'");
+  if (engine !== 'windows' && engine !== 'paddle') {
+    throw new Error("image_ocr: engine must be 'windows' (default) or 'paddle'");
   }
 
   const absolutePath = resolveImagePath(filePath);
@@ -242,18 +241,13 @@ export async function executeOcr(args) {
     regionDisplay = 'full';
   }
 
-  // PaddleOCR / RapidOCR are optional engines: degrade gracefully to the
-  // Windows engine (with a note) when they are missing or fail — never crash.
-  const OPTIONAL = {
-    paddle: { available: () => core.paddleAvailable(), install: 'node scripts/setup-ocr.mjs' },
-    rapid: { available: () => core.rapidAvailable(), install: 'node scripts/setup-rapid.mjs' }
-  };
+  // PaddleOCR is an optional engine: degrade gracefully to the Windows
+  // engine (with a note) when it is missing or fails — never crash.
   let effectiveEngine = engine;
   let note;
-  const opt = OPTIONAL[engine];
-  if (opt !== undefined && !(await opt.available())) {
+  if (engine === 'paddle' && !(await core.paddleAvailable())) {
     effectiveEngine = 'windows';
-    note = `${engine[0].toUpperCase()}${engine.slice(1)}OCR is not installed (engine="${engine}" requested) — fell back to Windows OCR. To install it, run: ${opt.install} (see README).`;
+    note = 'PaddleOCR is not installed (engine="paddle" requested) — fell back to Windows OCR. To install it, run: node scripts/setup-ocr.mjs (see README).';
   }
   let result;
   try {
@@ -263,9 +257,9 @@ export async function executeOcr(args) {
       engine: effectiveEngine
     });
   } catch (error) {
-    if (opt !== undefined && effectiveEngine === engine) {
+    if (engine === 'paddle' && effectiveEngine === 'paddle') {
       effectiveEngine = 'windows';
-      note = `${engine[0].toUpperCase()}${engine.slice(1)}OCR failed (${error.message.slice(0, 140)}) — fell back to Windows OCR.`;
+      note = `PaddleOCR failed (${error.message.slice(0, 140)}) — fell back to Windows OCR.`;
       result = await core.ocrImage(data, ext, {
         region: regionArray,
         language: args.language === undefined ? undefined : String(args.language).trim(),
@@ -347,27 +341,15 @@ export async function executeVisionAnalyze(args) {
   const data = await readImageFile(absolutePath, 'vision_analyze');
   const image = decodeBounded(core, data, ext, 'vision_analyze');
 
-  // Three-mode routing: read from runtime config
-  const { getRuntimeConfig } = await import('../src/runtime.js');
-  const { visionAnalyzeDefaults, isPrivacy, routePolicyText } = await import('../src/routing.js');
-  const rt = getRuntimeConfig();
-  const mode = rt?.mode ?? 'smart';
-  const defaults = visionAnalyzeDefaults(mode);
-  const privacy = isPrivacy(mode);
-
-  const includeScan = args.include_scan === undefined ? defaults.includeScan : boolArg(args.include_scan, true);
-  const includeOcr = args.include_ocr === undefined ? defaults.includeOcr : boolArg(args.include_ocr, false);
-  // privacy 硬 gate：不管 include_vlm 传什么，一律不调用 VLM。
-  const includeVlm = privacy ? false : (args.include_vlm === undefined ? defaults.includeVlm : boolArg(args.include_vlm, true));
+  const includeScan = args.include_scan === undefined ? true : boolArg(args.include_scan, true);
+  const includeOcr = args.include_ocr === undefined ? false : boolArg(args.include_ocr, false);
+  const includeVlm = args.include_vlm === undefined ? true : boolArg(args.include_vlm, true);
   const allowLowInfo = boolArg(args.allow_low_info, false);
   const stopAfter = boolArg(args.stop_after, false);
   const prompt = args.prompt ?? 'Describe this image in detail.';
 
-  // 当前模式的调用策略
-  const modePolicy = routePolicyText(mode, { vlmConfigured: isVlmConfigured() });
-
-  // Check if VLM is configured (privacy 下恒不可用)
-  const vlmAvailable = privacy ? false : isVlmConfigured();
+  // Check if VLM is configured
+  const vlmAvailable = isVlmConfigured();
   const shouldCallVlm = includeVlm && vlmAvailable;
 
   const lowInfo = isLowInformationImage(image.data, image.width, image.height);
@@ -432,21 +414,10 @@ export async function executeVisionAnalyze(args) {
       }
     }
   } else if (includeVlm && !vlmAvailable) {
-    const { DEFAULT_BASE, DEFAULT_API_KEY } = await import('../src/vlm.js');
-    const hasBase = DEFAULT_BASE.length > 0;
-    const hasKey = DEFAULT_API_KEY.length > 0;
-    if (hasBase && !hasKey) {
-      blocks.push('[vlm] VLM 未就绪：已配置端点但缺少 API key。\n' +
-        '要使用免费的 GLM-4V-Flash 视觉模型，请：\n' +
-        '1. 访问 https://open.bigmodel.cn 注册智谱账号\n' +
-        '2. 获取 API Key\n' +
-        '3. 设置环境变量：GLM_API_KEY=你的key 或 SEE_API_KEY=你的key');
-    } else {
-      blocks.push('[vlm] VLM 未配置（SEE_BASE 环境变量为空）');
-    }
+    blocks.push('[vlm] VLM 未配置（SEE_BASE 环境变量为空）');
   }
 
-  const combined = [modePolicy, ...blocks].join('\n\n---\n\n');
+  const combined = blocks.join('\n\n---\n\n');
   return {
     path: absolutePath,
     lowInformation: false,
@@ -470,28 +441,6 @@ export async function executeTool(name, args) {
     case 'image_ocr': return executeOcr(cleanArgs);
     case 'image_sample': return executeSample(cleanArgs);
     case 'vision_analyze': return executeVisionAnalyze(cleanArgs);
-    case 'image_crop': {
-      const core = await importCore();
-      const fp = resolveImagePath(String(cleanArgs.file_path ?? ''));
-      const data = await readImageFile(fp, 'image_crop');
-      return executeCrop(cleanArgs, { core, absolutePath: fp, data, ext: extname(fp).toLowerCase() });
-    }
-    case 'image_palette': {
-      const core = await importCore();
-      const fp = resolveImagePath(String(cleanArgs.file_path ?? ''));
-      const data = await readImageFile(fp, 'image_palette');
-      return executePalette(cleanArgs, { core, absolutePath: fp, data, ext: extname(fp).toLowerCase() });
-    }
-    case 'image_compare': {
-      const core = await importCore();
-      const fpA = resolveImagePath(String(cleanArgs.file_path_a ?? ''));
-      const fpB = resolveImagePath(String(cleanArgs.file_path_b ?? ''));
-      const dataA = await readImageFile(fpA, 'image_compare');
-      const dataB = await readImageFile(fpB, 'image_compare');
-      return executeCompare(cleanArgs, { core, absolutePath: fpA, data: dataA, ext: extname(fpA).toLowerCase() }, { core, absolutePath: fpB, data: dataB, ext: extname(fpB).toLowerCase() });
-    }
-    case 'image_batch':
-      return executeBatch(cleanArgs, { importCore, readImageFile, decodeBounded, resolveImagePath });
     default: throw new Error(`unknown tool: ${name}`);
   }
 }
@@ -560,9 +509,9 @@ export const TOOLS = [
   {
     name: 'image_ocr',
     description: [
-      'Recognize text in a local image. Three engines: engine="windows" (default) uses the Windows built-in OCR (no install, good for printed/UI text); engine="paddle" uses PaddleOCR via the local paddle_venv (much better for glowing, curved, stylized or game-rendered text and complex backgrounds, Chinese-friendly; ~2s model load per call); engine="rapid" uses RapidOCR via the local rapid_venv (bundled ONNX models, no network download, fast).',
-      'Use it together with image_scan: when the pixel grid shows a dense, regular, high-contrast structure that looks like text (e.g. titles, labels, buttons, dialogs, glowing banners), call image_ocr on that region and read the actual characters. If the Windows engine returns nothing but text is expected, retry with engine="paddle" or engine="rapid".',
-      'Parameters: file_path (required), region: [x0, y0, x1, y1] (0..1 fractions) or focus: [row0, col0, row1, col1] (grid coordinates) to restrict recognition to an area, language (optional BCP-47 tag like "zh-Hans" or "en-US", Windows engine only), engine ("windows" default, "paddle", "rapid").',
+      'Recognize text in a local image. Two engines: engine="windows" (default) uses the Windows built-in OCR (no install, good for printed/UI text); engine="paddle" uses PaddleOCR via the local paddle_venv (much better for glowing, curved, stylized or game-rendered text and complex backgrounds, Chinese-friendly; ~2s model load per call).',
+      'Use it together with image_scan: when the pixel grid shows a dense, regular, high-contrast structure that looks like text (e.g. titles, labels, buttons, dialogs, glowing banners), call image_ocr on that region and read the actual characters. If the Windows engine returns nothing but text is expected, retry with engine="paddle".',
+      'Parameters: file_path (required), region: [x0, y0, x1, y1] (0..1 fractions) or focus: [row0, col0, row1, col1] (grid coordinates) to restrict recognition to an area, language (optional BCP-47 tag like "zh-Hans" or "en-US", Windows engine only), engine ("windows" default, "paddle").',
       'Large images are automatically downscaled (long side capped at 1600px) for the paddle engine so calls stay fast; the result notes the downscale — crop with region/focus when you need fine text from a big image.',
       'The result lists each recognized line with its pixel bounding box and confidence score (paddle).'
     ].join(' '),
@@ -587,8 +536,8 @@ export const TOOLS = [
         },
         engine: {
           type: 'string',
-          enum: ['windows', 'paddle', 'rapid'],
-          description: '"windows" (default) = Windows built-in OCR; "paddle" = PaddleOCR via local paddle_venv (better for glowing/curved/game text); "rapid" = RapidOCR via local rapid_venv (bundled ONNX models, fast).'
+          enum: ['windows', 'paddle'],
+          description: '"windows" (default) = Windows built-in OCR; "paddle" = PaddleOCR via local paddle_venv (better for glowing/curved/game text).'
         }
       },
       required: ['file_path']
@@ -628,7 +577,6 @@ export const TOOLS = [
       'Returns evidence blocks: scan (pixel stats), ocr (real text), vlm (model description). If low-information guard triggers and allow_low_info is false, it will not call the VLM.',
       'Supported formats: PNG, JPEG, GIF (first frame), BMP. WebP is not supported yet.',
       'VLM is optional: if SEE_BASE is not configured, VLM calls are skipped automatically.',
-      'Three-mode routing: privacy (local-only, no VLM), smart (auto-decide), strict (cross-validate). Privacy mode forces include_vlm=false.',
       'Smart API calling: simple images (low color diversity, high dominant color coverage) skip VLM automatically.',
       'Multiple questions: call this tool multiple times with different prompts on the same image for comprehensive analysis.',
       'Cross-validation: main model should verify VLM results against pixel scan and OCR evidence.'
@@ -652,12 +600,12 @@ export const TOOLS = [
         },
         ocr_engine: {
           type: 'string',
-          enum: ['windows', 'paddle', 'rapid'],
-          description: 'OCR engine: windows (default), paddle or rapid (see image_ocr for details).'
+          enum: ['windows', 'paddle'],
+          description: 'OCR engine: windows (default) or paddle (better for glowing/curved/game text).'
         },
         include_vlm: {
           type: 'boolean',
-          description: 'Include VLM description (default true, but privacy mode forces false).'
+          description: 'Include VLM description (default true, but skipped if SEE_BASE not configured).'
         },
         allow_low_info: {
           type: 'boolean',
@@ -670,124 +618,6 @@ export const TOOLS = [
       },
       required: ['file_path']
     }
-  },
-  {
-    name: 'image_crop',
-    description: [
-      'Crop a local image to a rectangular fraction region and write the result as a lossless PNG file.',
-      'Parameters: file_path (required, PNG/JPEG/GIF/BMP), region (required, [x0, y0, x1, y1] fractions in 0..1), out_path (optional — where to write the PNG; when empty a unique file is created under the system temp directory).',
-      'Returns the written output path plus the cropped pixel dimensions. Use image_scan / image_ocr on the returned path to continue analyzing the cropped result.'
-    ].join(' '),
-    inputSchema: {
-      type: 'object',
-      additionalProperties: true,
-      properties: {
-        file_path: { type: 'string', description: IMAGE_PATH_DESCRIPTION },
-        region: {
-          type: 'array',
-          description: 'Required [x0, y0, x1, y1] fractions in 0..1 to crop to.',
-          items: { type: 'number' }
-        },
-        out_path: {
-          type: 'string',
-          description: 'Optional output path for the cropped PNG. When empty, a unique file is written under the system temp directory.'
-        }
-      },
-      required: ['file_path', 'region']
-    }
-  },
-  {
-    name: 'image_palette',
-    description: [
-      'Extract the dominant colors of a local image (or a region of it) using 3-bit/channel quantization, plus a hue-family breakdown for an overall tone read.',
-      'Each dominant color gives its hex, a classified palette name, its percent share, and its RGB tuple.',
-      'hue_families groups colors by hue family regardless of darkness — the most robust signal for overall image tone.'
-    ].join(' '),
-    inputSchema: {
-      type: 'object',
-      additionalProperties: true,
-      properties: {
-        file_path: { type: 'string', description: IMAGE_PATH_DESCRIPTION },
-        region: {
-          type: 'array',
-          description: 'Optional [x0, y0, x1, y1] fractions in 0..1 to restrict analysis to part of the image.',
-          items: { type: 'number' }
-        },
-        top: {
-          type: 'integer',
-          description: 'Number of dominant colors to return (1..32, default 12).'
-        },
-        sample_step: {
-          type: 'integer',
-          description: 'Optional sampling stride in pixels (default 1 = every pixel).'
-        }
-      },
-      required: ['file_path']
-    }
-  },
-  {
-    name: 'image_compare',
-    description: [
-      'Compare two local images pixel-by-pixel, optionally within the same 0..1 fraction region of both, and report how different they are.',
-      'Returns mean_diff, diff_ratio, max_diff, diff_box, and a verdict (same/different/size-diff).',
-      'Optionally writes a red-marked difference preview PNG.'
-    ].join(' '),
-    inputSchema: {
-      type: 'object',
-      additionalProperties: true,
-      properties: {
-        file_path_a: { type: 'string', description: 'Path to the first image file.' },
-        file_path_b: { type: 'string', description: 'Path to the second image file.' },
-        region: {
-          type: 'array',
-          description: 'Optional [x0, y0, x1, y1] fractions in 0..1 applied to both images.',
-          items: { type: 'number' }
-        },
-        max_diff_threshold: {
-          type: 'number',
-          description: 'Optional 0..1 threshold (default 0.05) for the verdict.'
-        },
-        downsample: {
-          type: 'integer',
-          description: 'Optional sampling stride (1..32, default 4).'
-        },
-        preview_path: {
-          type: 'string',
-          description: 'Optional output path for a difference preview PNG.'
-        }
-      },
-      required: ['file_path_a', 'file_path_b']
-    }
-  },
-  {
-    name: 'image_batch',
-    description: [
-      'Batch-scale / context-validation tool: given a LIST of image paths, return one compact manifest (per-file type guess + whether it has text + a short scan/OCR excerpt + a recommendation) plus a whole-batch summary.',
-      'Use it when many images arrive together and none have individual instructions.',
-      'Each item reports: index, basename, width x height, type (text/table/photo/chart/blank/unknown), has_text, ocr_excerpt, scan_preview and a recommendation.'
-    ].join(' '),
-    inputSchema: {
-      type: 'object',
-      additionalProperties: true,
-      properties: {
-        file_paths: {
-          type: 'array',
-          description: 'List of image paths to batch.',
-          items: { type: 'string' }
-        },
-        auto_ocr: {
-          type: 'string',
-          enum: ['auto', 'always', 'never'],
-          description: "'auto' (default) = probe first few; 'always' = OCR every image; 'never' = no OCR."
-        },
-        preview: {
-          type: 'string',
-          enum: ['scan', 'none'],
-          description: "'scan' (default) = include scan preview; 'none' = skip."
-        }
-      },
-      required: ['file_paths']
-    }
   }
 ];
 
@@ -796,47 +626,6 @@ async function renderResult(name, value) {
   // vision_analyze has its own combined field
   if (name === 'vision_analyze') {
     return value.combined ?? value.message ?? JSON.stringify(value);
-  }
-  // image_crop: simple summary
-  if (name === 'image_crop') {
-    const lines = [`crop: ${value.path} (${value.width}x${value.height}) -> ${value.outPath}`];
-    if (value.generated) lines.push(`written to generated temp file under ${value.tempDir}`);
-    if (value.note !== undefined) lines.push(value.note);
-    return lines.join('\n');
-  }
-  // image_palette: structured summary
-  if (name === 'image_palette') {
-    const lines = [`palette: ${value.path} (${value.width}x${value.height}, region=${value.region})`];
-    if (value.top?.length > 0) {
-      lines.push(`dominant colors: ${value.top.map((c) => `${c.name} ${c.pct}% (${c.hex} rgb(${c.rgb.r},${c.rgb.g},${c.rgb.b}))`).join(', ')}`);
-    }
-    if (value.hue_families?.length > 0) {
-      const colored = value.hue_families.filter((h) => h.family !== 'achromatic');
-      const achromatic = value.hue_families.find((h) => h.family === 'achromatic');
-      lines.push(`hue families: ${colored.map((h) => `${h.family} ${h.pct}%`).join(', ')}${achromatic ? `, achromatic ${achromatic.pct}%` : ''}`);
-    }
-    lines.push(`distinct quantization buckets: ${value.distinct}`);
-    return lines.join('\n');
-  }
-  // image_compare: structured summary
-  if (name === 'image_compare') {
-    const lines = [`compare: ${value.path_a} (${value.width_a}x${value.height_a}) vs ${value.path_b} (${value.width_b}x${value.height_b})`];
-    lines.push(`verdict: ${value.verdict} | mean_diff=${value.mean_diff} diff_ratio=${value.diff_ratio} max_diff=${value.max_diff}`);
-    if (value.size_diff) lines.push(`size_diff: w ${value.size_diff.w}, h ${value.size_diff.h}`);
-    if (value.diff_box) lines.push(`difference region: ${value.diff_box.join(',')}`);
-    if (value.preview_path) lines.push(`preview: ${value.preview_path}`);
-    return lines.join('\n');
-  }
-  // image_batch: structured summary
-  if (name === 'image_batch') {
-    const lines = [value.summary ?? `image_batch: processed=${value.processed}, errors=${value.errors}`];
-    for (const item of value.items ?? []) {
-      if (item.error) { lines.push(`  [!] ${item.index}. ${item.basename} — ERROR: ${item.error}`); continue; }
-      let line = `[${item.index}] ${item.basename} ${item.width}x${item.height} type=${item.type}${item.has_text ? ' text=yes' : ''} | ${item.recommendation}`;
-      if (item.ocr_excerpt) line += `\n    ocr: ${item.ocr_excerpt}`;
-      lines.push(line);
-    }
-    return lines.join('\n');
   }
   const core = await importCore();
   const renderer =
@@ -951,7 +740,7 @@ export function runServer(input = process.stdin, output = process.stdout, log = 
   };
   rl.on('line', onLine);
   rl.on('error', onError);
-  log.write('picturereader MCP server ready (image_scan / image_ocr / image_sample / vision_analyze / image_crop / image_palette / image_compare / image_batch)\n');
+  log.write('picturereader MCP server ready (image_scan / image_ocr / image_sample / vision_analyze)\n');
   return () => {
     rl.off('line', onLine);
     rl.off('error', onError);

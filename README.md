@@ -1,7 +1,7 @@
 # picturereader（ZCode 版）
 
-> **v2.0.0** —— 给纯文本模型（如 deepseek-v4-flash）的**全能"读图"能力**。
-> 融合 **独立伪多模态识图** 与 **外部视觉 API 接口**，一个插件搞定全部，**无需另装任何插件**。
+> **v3.0.3** —— 给纯文本模型（如 deepseek-v4-flash）的**全能"读图"能力**。
+> 融合 **独立伪多模态识图**（含三引擎 OCR + 批量 + 文档转图片）与 **外部视觉 API 接口**，一个插件搞定全部，**无需另装任何插件**。
 > 本分支为 **ZCode 桌面端插件**（经 MCP 暴露工具）；DSH 版见 [main 分支](https://github.com/jing-hy/picturereader)。
 
 > - **DSH 版**：DeepSeek Harness 插件（`dsh-plugin`，含 DSH EAC 桌面端）—— [main 分支](https://github.com/jing-hy/picturereader)
@@ -27,7 +27,7 @@
 | **ZCode 版** | ZCode 桌面端 | 本地 marketplace 插件（MCP server + skill） | 本分支 | `npm install picturereader-zcode` |
 
 两个版本共用同一套业务核心（`src/core.js`）与读图方法论 skill（`image-reading`），
-四个工具行为完全一致：`image_scan` / `image_ocr` / `image_sample` / `vision_analyze`。
+核心工具行为完全一致：`image_scan` / `image_ocr` / `image_sample` / `vision_analyze`。
 
 > **兼容性**：DSH 版已验证兼容 **DeepSeek Harness EAC 4.2.0** 及 `@deepseek-ai/dsh-client-ui-workspace` **rc.7**（4.2.0 配套的官方工作区插件版本）。
 
@@ -41,7 +41,7 @@
 
 1. **全局定调**：hue families（纯色指纹）→ structure（条纹/对称）→ texture（写实度）→ regions（色块结构）
 2. **主动找主体**：px_per_cell 定向放大（深色/低对比/小色块不会漏）
-3. **文字验证**：PaddleOCR 实读（防多模态幻觉）
+3. **文字验证**：PaddleOCR / RapidOCR 实读（防多模态幻觉）
 4. **材质判断**：image_sample 像素取样
 5. **（可选）VLM 语义理解**：外部视觉 API 提供场景/角色/界面/风格的自然语言描述
 6. **综合描述**：带证据等级的连贯画面描述，伪多模态与 VLM 交叉验证
@@ -51,9 +51,14 @@
 | 工具 | 作用 |
 |---|---|
 | `image_scan` | 全局/区域扫描：亮度/颜色网格 + regions 色块 + shade diversity + texture mix + structure（条纹/对称） + **像素级 colors** + **hue families 纯色指纹**；支持 `focus`/`region` 局部放大、`px_per_cell` 像素密度定向放大 |
-| `image_ocr` | 文字识别双引擎：`windows`（内置，默认）/ `paddle`（选装，发光/弯曲/游戏字更强），失败自动降级不崩溃 |
+| `image_ocr` | 文字识别三引擎：`windows`（内置，默认）/ `paddle`（选装，发光/弯曲/游戏字更强）/ `rapid`（选装，ONNX 模型，快速），失败自动降级不崩溃 |
 | `image_sample` | 8×8 精确像素取样，判断材质/纹理（金属/木纹/织物/皮肤/噪点） |
-| `vision_analyze` | **统一入口（v2.0.0 新增）**：低信息拦截 + 可选像素扫描/OCR/VLM，组合证据返回；VLM 可选配置 |
+| `image_crop` | 按 0..1 分数区域裁剪图片，输出 PNG 文件供后续工具分析 |
+| `image_palette` | 3-bit/通道量化提取主色列表 + 色相家族分布，理解整体色调 |
+| `image_compare` | 两张图片像素级对比，报告差异比例/差异区域/判定结果，可选红色差异预览 PNG |
+| `image_batch` | 批量图片分诊：自动探测文字密度、分类（text/table/photo/chart/blank）、OCR 摘要、扫描预览，软上限 ~6k 字符 |
+| `document_to_image` | 文档转图片（pdf/docx/doc/xlsx/xls/pptx/ppt 逐页转 PNG），依赖 doc_venv + LibreOffice |
+| `vision_analyze` | **统一入口**：低信息拦截 + 可选像素扫描/OCR/VLM，三模式路由（privacy/smart/strict），组合证据返回 |
 
 ### 读图方法论 skill（image-reading）
 
@@ -74,13 +79,29 @@ ZCode 版通过 **MCP server**（`mcp/server.js`，stdio）把四个工具暴露
 npm install picturereader-zcode
 ```
 
+### （可选）RapidOCR 增强引擎
+
+```sh
+node scripts/setup-rapid.mjs
+```
+
+RapidOCR 使用 ONNX 模型，无需网络下载，速度快。缺失时 `image_ocr` 自动降级为 Windows OCR。
+
 ### （可选）PaddleOCR 增强引擎
 
 ```sh
 node scripts/setup-ocr.mjs
 ```
 
-PaddleOCR 缺失时 `image_ocr` 自动降级为 Windows OCR。
+PaddleOCR 对发光/弯曲/游戏文字效果更好。缺失时 `image_ocr` 自动降级为 Windows OCR。
+
+### （可选）文档转图片（doc_venv）
+
+```sh
+node scripts/setup-doc-venv.mjs
+```
+
+`document_to_image` 工具需要 Python 虚拟环境（pymupdf）和 LibreOffice。缺失时该工具会提示安装。
 
 ## 使用
 
@@ -89,7 +110,17 @@ PaddleOCR 缺失时 `image_ocr` 自动降级为 Windows OCR。
 > 用 image_scan 看一下 <路径> 这张图，细看感兴趣的部分
 > （复杂场景可接着用 vision_analyze 获取语义描述并交叉验证）
 
-### vision_analyze 用法（v2.0.0）
+### 三模式路由（v3.0.0 新增）
+
+通过配置 `mode` 参数控制 VLM 调用策略：
+
+| 模式 | 行为 |
+|---|---|
+| **privacy**（隐私） | 绝不调用外部 API，全走本地工具。硬 gate，即使配置了 VLM 也不外呼 |
+| **smart**（智能，默认） | 先简单看图再决定是否外呼，省轮数/时间 |
+| **strict**（严谨） | 自行选择 + 必要时交叉验证细节 |
+
+### vision_analyze 用法
 
 ```
 vision_analyze(
@@ -97,7 +128,7 @@ vision_analyze(
   prompt="描述这个界面，有哪些元素？布局是否正常？",
   include_scan=true,    # 像素扫描证据（默认 true）
   include_ocr=true,     # OCR 文字证据（默认 false）
-  include_vlm=true,     # 外部 VLM 语义描述（默认 true，但未配置 SEE_BASE 时自动跳过）
+  include_vlm=true,     # 外部 VLM 语义描述（默认 true，但 privacy 模式强制 false）
   allow_low_info=false, # 空白/简单图是否强制调 VLM（默认 false）
   stop_after=false      # 调用后是否关闭本插件启动的本地服务器
 )

@@ -1,7 +1,7 @@
 {
     "name":  "picturereader-zcode",
-    "version":  "3.0.3",
-    "description":  "ZCode plugin: unified image understanding for text-only models. Fuses frame-free pseudo-multimodal reading (pixel scan + OCR×3 engines + sample + crop/palette/compare + batch + document-to-image) with an optional external vision API bridge (LM Studio / llama-server / any OpenAI-compatible endpoint) for full semantic understanding. Three-mode routing (privacy/smart/strict). No extra plugin needed.",
+    "version":  "2.0.1",
+    "description":  "ZCode plugin: unified image understanding for text-only models. Fuses frame-free pseudo-multimodal reading (pixel scan + OCR + sample) with an optional external vision API bridge (LM Studio / llama-server / any OpenAI-compatible endpoint) for full semantic understanding. No extra plugin needed.",
     "type":  "module",
     "main":  "src/core.js",
     "exports":  {
@@ -20,9 +20,7 @@
     "scripts":  {
                     "test":  "node --test",
                     "preview":  "node scripts/preview.mjs",
-                    "setup-ocr":  "node scripts/setup-ocr.mjs",
-                    "setup-rapid":  "node scripts/setup-rapid.mjs",
-                    "setup-doc-venv":  "node scripts/setup-doc-venv.mjs"
+                    "setup-ocr":  "node scripts/setup-ocr.mjs"
                 },
     "keywords":  [
                      "zcode",
@@ -33,14 +31,12 @@
                      "ascii",
                      "ocr",
                      "paddleocr",
-                     "rapidocr",
                      "hue",
                      "multimodal",
                      "mcp",
                      "vlm",
                      "vision-analyze",
-                     "llm-vision",
-                     "document-to-image"
+                     "llm-vision"
                  ],
     "license":  "MIT",
     "author":  "picturereader",
