@@ -1,6 +1,6 @@
 # picturereader
 
-> **v3.0.3** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
+> **v3.0.4** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
 > 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）与**可选外部 VLM 桥**。一个插件全包，无需另装。
 
 [![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
@@ -172,6 +172,26 @@ node scripts/setup-doc-venv.mjs  # 建 doc_venv 装 PyMuPDF
 用 image_scan 看一下 <路径> 这张图，细看感兴趣的部分
 （复杂场景可接着用 vision_analyze；如有文字先 image_ocr；一批图用 image_batch；
   文档用 document_to_image 逐页转成图片再看）
+```
+
+## Code Mode（工具折叠）兼容说明
+
+DSH 的 `tools` 呈现有三种 `mode`：`native`（默认，模型可直呼所有工具）、`code`（只允许模型直呼 `run_code`，其它工具折叠进 `run_code` 的生成 SDK 内调用）、`both`（两种都能用）。
+
+- **picturereader 所有工具与 mode 无关**：`native` / `both` 下全部可直呼；`code` 下也**完全可用**，只是要经 `run_code` 程序内调用（`await tools.image_scan(...)` / `await tools.vision_analyze(...)`）。工具会被自动投影进 `run_code` 生成的 SDK，一个都不少。
+- **若报错** `Error: unknown tool "vision_analyze" ... only run_code is callable directly ...`——这不是插件坏了，而是当前会话处于 `code` 模式、仍以直呼方式发起了调用。两种情况任选其一：
+  1. 把该部署的 `tools.mode` 设为 `both`（最省心：直呼 + run_code 都能用，不会降速）；
+  2. 保持 `code` 模式，改用 `run_code` 程序调用（见下方示例）。
+- **推荐**：日常使用直接保持 `native` 或 `both`；`code` 是平台级的"只留 run_code"硬化模式，对本地看图工具是净亏（更多轮数、更多 token），非必要不开。
+
+在 `code` 模式下用 `run_code` 调用示例（Python）：
+
+```python
+async def main():
+    r = await tools.image_scan({"file_path": r"C:\path\to\img.png"})
+    return r
+
+await main()
 ```
 
 ## 三模式（使用模式）
