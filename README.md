@@ -1,6 +1,6 @@
 # picturereader
 
-> **v3.0.5** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
+> **v3.0.6** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
 > 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）与**可选外部 VLM 桥**。一个插件全包，无需另装。
 
 [![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
@@ -297,6 +297,10 @@ await main()
 | 三模式路由 | ✅ | privacy/smart/strict 逻辑全部正确 |
 | 视觉孪生 adapter | ✅ | 3 个 provider 激活 |
 | 设置持久化 | ✅ | vision_models / ocr_engine / mode 全部保留 |
+
+### v3.0.6 修复
+
+- **依赖安装完整性修复**：修复了 picturereader 安装后图像分析功能（scan / ocr / vision）静默失败的问题。根因是 npm install 未完整执行，`jpeg-js`、`omggif`、`pngjs` 三个运行时依赖没有正确安装到 `node_modules/` 目录下，导致 `core.js` 顶层 import 失败。修复方案：在内置插件打包时预装依赖，确保 `node_modules/` 随插件一起分发。
 
 ### v3.0.5 修复
 
