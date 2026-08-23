@@ -1,19 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { cropRgba, encodePng, buildOcrCommand, ocrImage, decodeImage, paddleAvailable } from '../src/core.js';
 import { createImageOcrTool } from '../src/tool.js';
 import { makeQuadrantRgba, pngFromRgba } from './fixtures.mjs';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'fixtures-out', 'ocr-test.png');
+const CHECKED_IN_FIXTURE = join(dirname(OUT), '..', 'fixtures', 'ocr-text.png');
 
-/** Generate the text-bearing test image once (PowerShell System.Drawing). */
+// The OCR engine that actually works on this platform. macOS needs the
+// compiled Vision binary (DSH_MACOS_OCR_BIN or the default cache path);
+// Windows OCR is built in. Tests exercising real recognition run against the
+// native engine so the suite is green on every OS.
+const IS_DARWIN = process.platform === 'darwin';
+const MAC_OCR_READY = IS_DARWIN && (process.env.DSH_MACOS_OCR_BIN !== undefined || existsSync(join(homedir(), '.dsh', 'cache', 'picturereader', 'macos-ocr')));
+const NATIVE_ENGINE = IS_DARWIN ? 'macos' : 'windows';
+const NEED_MAC_BIN = IS_DARWIN && !MAC_OCR_READY ? 'macOS OCR binary not built — run: node scripts/setup-macos.mjs' : false;
+
+/**
+ * Provide the text-bearing test image. Cross-platform: reuse the checked-in
+ * CoreText fixture (tests/fixtures/ocr-text.png) when present — any OS; fall
+ * back to generating it locally via PowerShell System.Drawing (Windows only).
+ */
 function ensureOcrTestImage() {
   mkdirSync(dirname(OUT), { recursive: true });
   if (existsSync(OUT)) return;
+  if (existsSync(CHECKED_IN_FIXTURE)) {
+    copyFileSync(CHECKED_IN_FIXTURE, OUT);
+    return;
+  }
   const ps = [
     'Add-Type -AssemblyName System.Drawing',
     '$bmp = New-Object System.Drawing.Bitmap 900, 220',
@@ -63,11 +82,11 @@ test('buildOcrCommand: inlines the path with single-quote escaping', () => {
   assert.ok(zh.includes("TryCreateFromLanguage([Windows.Globalization.Language]::new('zh-Hans'))"));
 });
 
-test('ocrImage: recognizes English and Chinese text end to end', async () => {
+test('ocrImage: recognizes English and Chinese text end to end', { skip: NEED_MAC_BIN }, async () => {
   ensureOcrTestImage();
   const { readFileSync } = await import('node:fs');
   const buffer = readFileSync(OUT);
-  const result = await ocrImage(buffer, '.png');
+  const result = await ocrImage(buffer, '.png', { engine: NATIVE_ENGINE });
   assert.ok(result.width > 0 && result.height > 0);
   const allText = result.lines.map((l) => l.text).join(' ');
   assert.match(allText, /OCR/, 'should recognize the English word OCR');
@@ -75,15 +94,15 @@ test('ocrImage: recognizes English and Chinese text end to end', async () => {
   assert.ok(result.lines[0].x >= 0 && result.lines[0].width > 0, 'line box should be populated');
 });
 
-test('ocrImage: region crop restricts recognition', async () => {
+test('ocrImage: region crop restricts recognition', { skip: NEED_MAC_BIN }, async () => {
   ensureOcrTestImage();
   const { readFileSync } = await import('node:fs');
   const buffer = readFileSync(OUT);
   // top 20% has no text (text sits around y 60..122 of 220)
-  const empty = await ocrImage(buffer, '.png', { region: [0, 0, 1, 0.2] });
+  const empty = await ocrImage(buffer, '.png', { region: [0, 0, 1, 0.2], engine: NATIVE_ENGINE });
   assert.equal(empty.lines.length, 0);
   // band around the text still recognizes it
-  const hit = await ocrImage(buffer, '.png', { region: [0, 0.25, 1, 0.7] });
+  const hit = await ocrImage(buffer, '.png', { region: [0, 0.25, 1, 0.7], engine: NATIVE_ENGINE });
   assert.ok(hit.lines.length > 0);
 });
 
@@ -103,13 +122,13 @@ function makeFakeCtx(bytes) {
 
 const EXEC = { signal: undefined, agent: { session: { header: { cwd: 'C:\\work' } } } };
 
-test('image_ocr tool: full pipeline through execute', async () => {
+test('image_ocr tool: full pipeline through execute', { skip: NEED_MAC_BIN }, async () => {
   ensureOcrTestImage();
   const { readFileSync } = await import('node:fs');
   const bytes = readFileSync(OUT);
   const { ctx, emitted } = makeFakeCtx(bytes);
   const tool = createImageOcrTool(ctx);
-  const result = await tool.execute({ file_path: 'ui.png' }, EXEC);
+  const result = await tool.execute({ file_path: 'ui.png', engine: NATIVE_ENGINE }, EXEC);
   assert.equal(result.path, 'C:\\img\\ui.png');
   assert.equal(result.region, 'full');
   const allText = result.lines.map((l) => l.text).join(' ');
@@ -122,13 +141,13 @@ test('image_ocr tool: full pipeline through execute', async () => {
   assert.match(rendered, /ocr: C:\\img\\ui\.png/);
 });
 
-test('image_ocr tool: focus restriction and validation', async () => {
+test('image_ocr tool: focus restriction and validation', { skip: NEED_MAC_BIN }, async () => {
   ensureOcrTestImage();
   const { readFileSync } = await import('node:fs');
   const bytes = readFileSync(OUT);
   const { ctx } = makeFakeCtx(bytes);
   const tool = createImageOcrTool(ctx);
-  const focused = await tool.execute({ file_path: 'ui.png', focus: [1, 0, 5, 30] }, EXEC);
+  const focused = await tool.execute({ file_path: 'ui.png', focus: [1, 0, 5, 30], engine: NATIVE_ENGINE }, EXEC);
   assert.equal(focused.region, 'focus [1,0,5,30]');
   const allText = focused.lines.map((l) => l.text).join(' ');
   assert.match(allText, /OCR/);
@@ -139,7 +158,7 @@ test('image_ocr tool: focus restriction and validation', async () => {
   await assert.rejects(() => tool.execute({ file_path: 'ui.png', language: '   ' }, EXEC), /language must be a non-empty/);
   await assert.rejects(() => tool.execute({ file_path: 'notes.txt' }, EXEC), /unsupported image type/);
   await assert.rejects(() => tool.execute({ file_path: 'x.webp' }, EXEC), /WebP is not supported/);
-  await assert.rejects(() => tool.execute({ file_path: 'ui.png', engine: 'tesseract' }, EXEC), /engine must be 'windows' \(default\) or 'paddle'/);
+  await assert.rejects(() => tool.execute({ file_path: 'ui.png', engine: 'tesseract' }, EXEC), /engine must be 'windows', 'macos', 'paddle' or 'rapid'/);
 });
 
 test('image_ocr: paddle engine recognizes the same test image', { skip: !existsSync('C:/Users/Administrator/paddle_venv/Scripts/python.exe') }, async () => {
@@ -163,7 +182,7 @@ test('paddleAvailable: false for a missing interpreter, true for the configured 
   }
 });
 
-test('image_ocr: engine="paddle" degrades gracefully when PaddleOCR is missing', async () => {
+test('image_ocr: engine="paddle" degrades gracefully when PaddleOCR is missing', { skip: NEED_MAC_BIN }, async () => {
   ensureOcrTestImage();
   const { readFileSync } = await import('node:fs');
   const bytes = readFileSync(OUT);
@@ -174,7 +193,7 @@ test('image_ocr: engine="paddle" degrades gracefully when PaddleOCR is missing',
   process.env.DSH_PADDLE_PYTHON = 'C:/definitely/not/here/python.exe';
   try {
     const result = await tool.execute({ file_path: 'ui.png', engine: 'paddle' }, EXEC);
-    assert.equal(result.engine, 'windows', 'must degrade to the Windows engine');
+    assert.equal(result.engine, NATIVE_ENGINE, 'must degrade to the platform-native engine');
     assert.match(result.note, /PaddleOCR is not installed/);
     // degraded result still works (recognizes the control image)
     const allText = result.lines.map((l) => l.text).join(' ');

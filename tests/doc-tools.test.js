@@ -171,6 +171,8 @@ test('document_to_image: single PDF maps runner output into the result structure
 });
 
 test('document_to_image: explicit out_dir is honored and used for every page path', async () => {
+  // path style follows the host platform (join semantics differ per OS)
+  const OUT_DIR = process.platform === 'win32' ? 'D:\\out\\docs' : '/tmp/out/docs';
   let usedOut = null;
   const runner = (inputPath, outDir, prefix) => {
     usedOut = outDir;
@@ -178,10 +180,10 @@ test('document_to_image: explicit out_dir is honored and used for every page pat
   };
   const ctx = makeFakeCtx({ 'a.pdf': { buffer: MIN_PDF } }, { runner });
   const tool = createDocumentToImageTool(ctx);
-  const result = await tool.execute({ file_path: 'a.pdf', out_dir: 'D:\\out\\docs' }, EXEC);
-  assert.equal(usedOut, 'D:\\out\\docs');
-  assert.equal(result.out_dir, 'D:\\out\\docs');
-  assert.ok(result.documents[0].pages[0].path.startsWith('D:\\out\\docs'));
+  const result = await tool.execute({ file_path: 'a.pdf', out_dir: OUT_DIR }, EXEC);
+  assert.equal(usedOut, OUT_DIR);
+  assert.equal(result.out_dir, OUT_DIR);
+  assert.ok(result.documents[0].pages[0].path.startsWith(OUT_DIR));
 });
 
 test('document_to_image: batch file_paths converts each document and names prefixes distinctly', async () => {
