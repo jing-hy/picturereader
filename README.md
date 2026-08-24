@@ -1,7 +1,9 @@
 # picturereader
 
-> **v3.0.6** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
+> **v3.1.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
 > 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）与**可选外部 VLM 桥**。一个插件全包，无需另装。
+>
+> **v3.1.0 新增**：`read_image` 工具拦截 — 当 LLM 调用 DSH 内置的 `read_image` 工具时，如果返回了 image block，会自动替换为文本引导，避免后续请求因 image block 导致 `UNSUPPORTED_CONTENT` 错误。内置 `image-reading` 技能注册。
 
 [![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
@@ -18,7 +20,7 @@ picturereader 解决两件事：
 1. **把「看图/读文档」翻译成纯文本模型能理解的结构化证据**（像素级 huel/结构/材质分析 + OCR 实读 + 可选 VLM 语义描述），并沉淀为读图方法论 skill。
 2. **通过「视觉孪生 adapter」让纯文本模型在 DSH 里获得原生缩略图体验**：勾选模型即生成「(视觉)」变体，粘贴图片显示原生缩略图、图片块进会话、并被自动分析成文本路径 + 本地证据再交给模型——模型拿到的永远是纯文本，不会触发 `UNSUPPORTED_CONTENT`。
 
-> 版本徽章与兼容性：已验证兼容 **DeepSeek Harness EAC 4.2.0** 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。
+> **版本兼容性**：本版本专门兼容 **dsh 0.1.1-rc.2** 及 **dsheac 5.1.0**，已针对这两个版本进行适配测试与优化，确保稳定运行。同时兼容 DeepSeek Harness EAC 4.2.0 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。
 
 > 🚀 **后续将作为 DeepSeek Harness EAC 的内置视觉插件**：本插件计划替换内置的 `dsh-tool-vision`，随 DSH EAC 桌面版直接捆绑发布，开箱即用（见上游 PR）。作为独立包发布的目的，是让非 EAC / 旧版用户也能通过 `dsh plugin add picturereader` 或 Git/npm 安装获得同等「看图 / 读文档」能力。
 
@@ -272,8 +274,22 @@ await main()
 - **原生缩略图需启用视觉孪生**：文本模型默认不被 DSH 视为「支持图片」，需在设置卡勾选生成「(视觉)」变体并重启。
 - **WebP 暂不支持**：`image_scan` / `vision_analyze` 等对 WebP 报错，请先转成 PNG / JPEG。
 - **视觉桥模型勾选需重启 DSH** 生效（`vision_models` 的改动不会热加载）。
-- **`dsh-file-drop` 需停用**：其「拖入图片即注入文本」与视觉孪生/图片桥的自动分析可能冲突（重复/竞争注入），建议在对应 profile 停用；原生缩略图 + 图片桥自动分析已覆盖该需求。
+- **`dsh-file-drop` 需停用**：其「拖入图片即注入文本」与视觉孪生/图片桥的自动分析可能冲突（重复/竞争注入），建议在对应 profile 停用；原生缩略图 + 图片桥自动分析已覆盖该需求。**v3.1.0 修复**：增强了与 `dsh-file-drop` 的兼容性，当检测到冲突时会自动降级处理。
 - **外部 VLM 依赖网络/端点**：未配置端点或离线时自动跳过并给出提示；隐私模式恒不调用。
+
+## 拖拽上传问题排查
+
+如果遇到图片拖拽上传不工作的问题，请按以下步骤排查：
+
+1. **检查 `dsh-file-drop` 插件状态**：在 DSH 设置中检查 `dsh-file-drop` 插件是否启用。如果启用，请尝试禁用它，因为该插件可能与 picturereader 的图片桥冲突。
+
+2. **检查视觉孪生配置**：确保在设置页「图片阅读」中已勾选需要视觉桥的模型，并重启 DSH。
+
+3. **检查浏览器控制台**：打开浏览器开发者工具，查看控制台是否有 `[picturereader]` 相关的日志输出。如果有错误信息，请记录并反馈。
+
+4. **检查网络请求**：在开发者工具的 Network 标签中，查看是否有 `/picturereader/models` 等请求。如果没有，可能是插件未正确加载。
+
+5. **重启 DSH**：某些配置更改需要重启 DSH 才能生效。
 
 ## 测试情况
 
