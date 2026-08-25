@@ -28,6 +28,7 @@ import { createVisionAnalyzeTool } from './vision-analyze.js';
 import { registerMoreTools } from './more-tools.js';
 import { createImageBatchTool } from './image-batch.js';
 import { createDocumentToImageTool } from './doc-tools.js';
+import { createImageEditTool } from './image-edit.js';
 import { NS } from './config.js';
 import { settingsNamespace } from '@deepseek-ai/dsh-settings';
 import z from '@deepseek-ai/schemastery';
@@ -289,6 +290,7 @@ export function apply(ctx, config) {
     registerMoreTools(ctx);
     ctx.tools.register(createImageBatchTool(ctx));
     ctx.tools.register(createDocumentToImageTool(ctx));
+    ctx.tools.register(createImageEditTool(ctx));
   });
 
   // ── 注册内置技能（image-reading）──

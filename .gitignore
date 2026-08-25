@@ -5,3 +5,5 @@ tests/fixtures-out/
 *.log
 *.tgz
 .eac-copy-stamp.json
+__pycache__/
+*.pyc
