@@ -70,7 +70,7 @@ export function createImageScanTool(ctx) {
   return {
     name: 'image_scan',
     description: [
-      'Read a local image file as a coarse pixel grid (downscaled + color-quantized) so a text-only model can see layout, colors and rough shapes.',
+      'PREFERRED over read_image for text-only models: Read a local image file as a coarse pixel grid (downscaled + color-quantized) so a text-only model can see layout, colors and rough shapes. Use this instead of read_image when the model does not support image input.',
       'Use it to inspect charts, screenshots, diagrams, UI mockups or photos: report dominant colors with percentages, relative positions of regions, coarse structure and luminance patterns.',
       'The result includes a luminance grid (rows top->bottom, columns left->right; " "=transparent, "." darkest, "@" brightest), a color grid for colorful images (one letter per cell, see legend), a "grid coords" line giving the row/col range, and a regions list: connected color blobs with position (grid rows/cols), size, aspect and texture density.',
       'Semantic reading: use the regions list plus your world knowledge to infer WHAT the image contains, not just raw colors — e.g. a large rough round green blob above a thin brown stem reads as a tree; a dense cluster of small bright blobs near the center with a dark smooth frame reads as a screen with content. Combine regions with the grids and zoom (focus/region) to verify.',

@@ -57,22 +57,9 @@ export async function exportImage(attachment, ctx, dir) {
   if (cached) return cached;
   let data;
   const attachments = ctx.get?.('attachments') ?? ctx.attachments;
-  if (!attachments || typeof attachments.readImage !== 'function') {
-    console.error('[picturereader] attachments service not available:', {
-      hasGet: typeof ctx.get === 'function',
-      hasAttachments: !!ctx.attachments,
-      attachmentsType: typeof attachments,
-    });
-    throw new Error('picturereader: attachments service not available');
-  }
   try {
     ({ data } = await attachments.readImage(attachment));
   } catch (error) {
-    console.error('[picturereader] readImage failed:', {
-      error: String(error && error.message || error),
-      attachmentId: attachment.attachmentId,
-      mediaType: attachment.mediaType,
-    });
     throw new Error(`picturereader: cannot read pasted image: ${String(error && error.message || error)}`);
   }
   await mkdir(dir, { recursive: true });
@@ -135,26 +122,18 @@ export async function bridgeMessages(messages, ctx, dir) {
 }
 
 /**
- * 注册图片桥（agent/pre-step 桥 + llm/stream 兜底）。
+ * 注册图片桥（agent/pre-step 桥 + llm/stream 兜底 + read_image 拦截）。
  * @param {object} ctx - Cordis 上下文（inject: tools/llm/attachments）。
  * @param {() => object} 未使用 getConfig —— mode 从 runtime 读，保持实时。
  */
 export function attachImageBridge(ctx) {
-  console.log('[picturereader] attachImageBridge called, ctx keys:', Object.keys(ctx || {}));
-  
   // 注意：不在 agent/pre-step 读图降级 —— 该阶段图片 attachment 可能尚未落盘，
   // readImage 读不到会报错。真正的图片降级/分析放在 llm/stream（适配器层，此时
   // attachment 已保存）完成。
 
   // llm/stream 兜底：还带着 image block 的非多模态请求，降级后放行。
   ctx.on('llm/stream', (options, next) => {
-    const hasImage = hasImageBlock(options?.messages);
-    console.log('[picturereader] llm/stream fired, model=', options?.model, 'hasImage=', hasImage, 'messagesCount=', options?.messages?.length);
-    
-    if (hasImage) {
-      console.log('[picturereader] Image blocks detected in messages, processing...');
-    }
-    
+    console.log('[picturereader] llm/stream fired, model=', options?.model, 'hasImage=', hasImageBlock(options?.messages));
     return (async function* () {
       let downstream;
       try {
@@ -163,34 +142,47 @@ export function attachImageBridge(ctx) {
         const multimodal = rt?.multimodalModels || [];
         const model = options?.model || '';
         const inWhitelist = multimodal.includes(model);
-        
-        console.log('[picturereader] Bridge config:', { guardOn, inWhitelist, hasImage, mode: rt?.mode });
-        
-        if (guardOn && !inWhitelist && hasImage) {
+        if (guardOn && !inWhitelist && hasImageBlock(options.messages)) {
           const exportDir = (rt?.bridge?.exportDir || '').trim() || join(os.tmpdir(), 'picturereader-bridge');
-          console.log('[picturereader] Processing images, exportDir:', exportDir);
-          
           const before = options.messages.reduce((n, m) => n + (Array.isArray(m?.content) ? m.content.filter(b => b?.type === 'image').length : 0), 0);
           const messages = await bridgeMessages(options.messages, ctx, exportDir);
           const after = messages.reduce((n, m) => n + (Array.isArray(m?.content) ? m.content.filter(b => b?.type === 'image').length : 0), 0);
           const changed = messages.some((m, i) => m !== options.messages[i]);
-          
           console.log(`[picturereader] llm/stream images before=${before} after=${after} changed=${changed} model=${options.model}`);
-          
           if (changed) {
-            console.log('[picturereader] Messages changed, calling next with modified messages');
             downstream = next({ ...options, messages });
-          } else {
-            console.log('[picturereader] Messages not changed, using original');
           }
-        } else {
-          console.log('[picturereader] Skipping image processing:', { guardOn, inWhitelist, hasImage });
         }
       } catch (error) {
-        console.error('[picturereader] llm/stream downgrade failed:', String(error && error.message || error));
-        console.error('[picturereader] Error stack:', error?.stack);
+        console.log('[picturereader] llm/stream downgrade failed:', String(error && error.message || error));
       }
       yield* downstream ?? next();
     })();
+  });
+
+  // tools/post-execute 拦截：当 read_image 成功执行但返回了 image block 时，
+  // 将其替换为文本引导，避免后续请求因 image block 导致 UNSUPPORTED_CONTENT 错误。
+  ctx.on('tools/post-execute', async (exec, result, next) => {
+    try {
+      if (exec.name === 'read_image' && !result.isError) {
+        // 检查结果中是否包含 image block
+        const hasImage = result.content?.some(b => b.type === 'image');
+        if (hasImage) {
+          const filePath = exec.arguments?.file_path || 'the image file';
+          // 替换为文本引导，移除 image block
+          result = {
+            ...result,
+            content: [{
+              type: 'text',
+              text: `[图片已读取: ${filePath}]\n\n当前模型不支持图像输入，无法直接处理图片。请使用 picturereader 的工具来分析此图片：\n- image_scan(file_path="${filePath}") — 像素级扫描，看布局/颜色/结构\n- image_ocr(file_path="${filePath}") — 文字识别\n- vision_analyze(file_path="${filePath}") — 统一图像理解\n\n这些工具适用于所有模型，不需要模型支持图像输入。`
+            }]
+          };
+          console.log('[picturereader] intercepted read_image image block, replaced with text guidance');
+        }
+      }
+    } catch (error) {
+      console.log('[picturereader] tools/post-execute intercept failed:', String(error && error.message || error));
+    }
+    return next();
   });
 }
