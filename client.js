@@ -196,12 +196,21 @@ window.__ModuleLoader__.load({
       { value: "smart", labelKey: "modeSmart" },
       { value: "strict", labelKey: "modeStrict" },
     ];
-    var OCR_OPTS = [
-      { value: "windows", labelKey: "ocrWindows" },
-      { value: "macos", labelKey: "ocrMacos" },
-      { value: "paddle", labelKey: "ocrPaddle" },
-      { value: "rapid", labelKey: "ocrRapid" },
-    ];
+    // 平台条件：windows OCR 引擎仅在 Windows 显示，macos OCR 引擎仅在
+    // macOS 显示（paddle / rapid 为跨平台选装，始终显示）。DEFAULT_OCR 作为
+    // 「未配置时的平台原生默认」，与 src 侧引擎缺失时的平台降级目标一致。
+    var OCR_PLATFORM = (function () {
+      if (typeof navigator === "undefined") return null;
+      var ua = String(navigator.userAgent || "");
+      if (/Mac|iPhone|iPad|iPod/i.test(ua)) return "macos";
+      if (/Win/i.test(ua)) return "windows";
+      return null;
+    })();
+    var DEFAULT_OCR = OCR_PLATFORM === "macos" ? "macos" : (OCR_PLATFORM === "windows" ? "windows" : "paddle");
+    var OCR_OPTS = []
+      .concat(OCR_PLATFORM === "windows" ? [{ value: "windows", labelKey: "ocrWindows" }] : [])
+      .concat(OCR_PLATFORM === "macos" ? [{ value: "macos", labelKey: "ocrMacos" }] : [])
+      .concat([{ value: "paddle", labelKey: "ocrPaddle" }, { value: "rapid", labelKey: "ocrRapid" }]);
     // FIELDS: mode, vision_models (custom), vlm_enabled (checkbox), vlm_*, ocr_engine, advanced
     var FIELDS = [
       { key: "mode", type: "mode" },
@@ -467,7 +476,7 @@ window.__ModuleLoader__.load({
           }
           // For select fields (mode, ocr_engine), use draft value if touched, otherwise use current value
           if (f.type === "mode" || f.type === "ocr") {
-            var selectVal = draft[f.key] !== void 0 ? draft[f.key] : (value[f.key] || (f.type === "mode" ? "smart" : "windows"));
+            var selectVal = draft[f.key] !== void 0 ? draft[f.key] : (value[f.key] || (f.type === "mode" ? "smart" : DEFAULT_OCR));
             if (selectVal) ops.push({ op: "set", key: f.key, value: selectVal });
             return;
           }
@@ -544,11 +553,15 @@ window.__ModuleLoader__.load({
           );
         }
         if (f.type === "ocr") {
+          // 存储值未在当前平台可用的选项中时，回落到平台原生默认引擎，
+          // 避免 select 空白（例如跨平台迁移后的旧配置）。
+          var ocrDisplay = fieldDraft(f);
+          if (OCR_OPTS.every(function (o) { return o.value !== ocrDisplay; })) ocrDisplay = DEFAULT_OCR;
           return h("label", { key: f.key, className: "__pr_field" },
             h("span", { className: "__pr_label" }, t("ocr")),
             h("select", {
               className: "__pr_input",
-              value: fieldDraft(f) || "windows",
+              value: ocrDisplay,
               onChange: function (e) { setField(f, e.target.value); },
             }, OCR_OPTS.map(function (o) {
               return h("option", { key: o.value, value: o.value }, t(o.labelKey));
