@@ -1,7 +1,12 @@
 /**
  * picturereader — Web settings card (client half).
  *
- * registers a "图片阅读" section inside the DSH Web settings page:
+ * Registers a "图片阅读" section inside the DSH Web settings page, restyled to
+ * the settings-panel design language (the same vocabulary the General-section
+ * rows and the models page use: 720px section, bordered 12px card groups,
+ * capsule buttons h36 r18, 32px inputs, custom-chevron selects, details
+ * disclosure with rotating marker). Business logic is unchanged.
+ *
  *   - Top: usage mode dropdown (privacy / smart / strict)
  *   - Vision bridge model picker (checkbox list of all text-only models,
  *     each with an optional note field; checked models get a "(视觉)" variant)
@@ -9,7 +14,10 @@
  *   - OCR engine selector
  *   - Advanced settings (timeout / max tokens / export dir / debug)
  *
- * Hand-written ModuleLoader bundle — no build step.
+ * Hand-written ModuleLoader bundle — no build step. scope.load() usage is
+ * guarded (`typeof scope.load === "function"`) so the card runs on DSH hosts
+ * without a scope load surface (EAC desktop shells) as well as those that
+ * have one.
  */
 window.__ModuleLoader__.load({
   id: "picturereader",
@@ -20,34 +28,53 @@ window.__ModuleLoader__.load({
     var react = require("react");
     var h = react.createElement;
 
-    // ── CSS (theme tokens) ────────────────────────────────────────────────
+    // ── CSS (settings-panel design language) ───────────────────────────────
+    // Token vocabulary mirrored from dsh-client-ui-settings-models: sections
+    // max 720px, bordered rowCards (r12, pad 14/16), capsule buttons
+    // (h36 r18 primary fill / outline), inputs h32 r8 on bg-layer-1 with
+    // brand-primary focus, enum selects with the shared inset chevron,
+    // disclosure markers as a rotating 5px chevron.
     var CSS =
-      ".__pr_root{max-width:640px;display:flex;flex-direction:column;gap:10px}" +
-      ".__pr_field{display:flex;flex-direction:column;gap:4px}" +
-      ".__pr_label{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:6px}" +
-      ".__pr_hint{font-size:11px;color:var(--dsw-alias-label-tertiary)}" +
-      ".__pr_row{display:flex;align-items:center;gap:8px}" +
+      ".__pr_section{max-width:720px;display:flex;flex-direction:column;gap:12px;color:var(--dsw-alias-label-primary)}" +
+      ".__pr_intro{margin:0;font-size:14px;line-height:22px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__pr_card{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}" +
+      ".__pr_cardTitle{margin:0;font-size:14px;line-height:22px;font-weight:500;color:var(--dsw-alias-label-primary)}" +
+      ".__pr_subHint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__pr_field{display:flex;flex-direction:column;gap:6px}" +
+      ".__pr_label{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-secondary)}" +
+      ".__pr_hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__pr_input{box-sizing:border-box;width:100%;height:32px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font:inherit;font-size:14px;line-height:22px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}" +
+      ".__pr_input:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}" +
+      ".__pr_input::placeholder{color:var(--dsw-alias-label-dimmed)}" +
+      ".__pr_inputSmall{box-sizing:border-box;width:150px;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font:inherit;font-size:12px;line-height:18px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}" +
+      ".__pr_inputSmall:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}" +
+      "select.__pr_input{width:auto;min-width:240px;max-width:100%;cursor:pointer;appearance:none;padding-right:32px;background-image:url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27 fill=%27none%27%3E%3Cpath d=%27M3 4.5L6 7.5L9 4.5%27 stroke=%27%2381858C%27 stroke-width=%271.5%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E');background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}" +
       ".__pr_check{accent-color:var(--dsw-alias-state-business-primary)}" +
-      ".__pr_input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 10px;font-size:13px;box-sizing:border-box;width:100%}" +
-      ".__pr_inputSmall{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:6px;padding:3px 6px;font-size:11px;width:100px;box-sizing:border-box}" +
-      ".__pr_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 8px;font-size:13px}" +
-      ".__pr_actions{display:flex;gap:8px;align-items:center;margin-top:4px}" +
-      ".__pr_btn{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer}" +
-      ".__pr_btn:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary)}" +
-      ".__pr_btn:disabled{opacity:.5;cursor:default}" +
-      ".__pr_btnPrimary{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-on-accent)}" +
-      ".__pr_status{font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
-      ".__pr_error{font-size:12px;color:var(--dsw-alias-state-error-primary)}" +
-      ".__pr_advanced{margin-top:8px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:6px}" +
-      ".__pr_advancedSummary{cursor:pointer;font-size:13px;font-weight:600;color:var(--dsw-alias-label-secondary);user-select:none;display:flex;align-items:center;gap:5px}" +
-      ".__pr_advancedArrow{display:inline-block;transition:transform .18s ease;font-size:13px;line-height:1;color:var(--dsw-alias-label-secondary);transform:rotate(0)}" +
-      ".__pr_advanced[open] .__pr_advancedArrow{transform:rotate(90deg)}" +
-      ".__pr_unavailable{font-size:13px;color:var(--dsw-alias-label-tertiary)}" +
-      ".__pr_modelList{display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px;background:var(--dsw-alias-bg-layer-2)}" +
-      ".__pr_modelRow{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px}" +
-      ".__pr_modelName{flex:1;color:var(--dsw-alias-label-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-      ".__pr_modelProvider{font-size:10px;color:var(--dsw-alias-label-tertiary);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-      ".__pr_empty{font-size:12px;color:var(--dsw-alias-label-tertiary);font-style:italic;padding:8px 0}";
+      ".__pr_actions{display:flex;align-items:center;gap:8px;margin-top:4px}" +
+      ".__pr_btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:36px;padding:0 14px;border:none;border-radius:18px;font:inherit;font-size:14px;line-height:22px;cursor:pointer}" +
+      ".__pr_btnPrimary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}" +
+      ".__pr_btnPrimary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}" +
+      ".__pr_btnSecondary{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary)}" +
+      ".__pr_btnSecondary:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}" +
+      ".__pr_btn:disabled{opacity:.4;cursor:default}" +
+      ".__pr_btn:focus-visible,.__pr_input:focus-visible,.__pr_inputSmall:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-alias-border-l3)}" +
+      ".__pr_status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__pr_saved{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary)}" +
+      ".__pr_error{font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}" +
+      ".__pr_advanced{border-top:1px solid var(--dsw-alias-border-l2);padding-top:12px;display:flex;flex-direction:column;gap:12px}" +
+      ".__pr_advancedSummary{display:flex;align-items:center;gap:6px;width:fit-content;padding:2px 4px;margin-left:-4px;border-radius:6px;cursor:pointer;list-style:none;font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-secondary)}" +
+      ".__pr_advancedSummary::-webkit-details-marker{display:none}" +
+      ".__pr_advancedSummary::before{content:'';width:5px;height:5px;border-right:1.5px solid currentcolor;border-bottom:1.5px solid currentcolor;transform:rotate(-45deg) translate(-1px,-1px);transition:transform 120ms ease}" +
+      "details.__pr_advanced[open] > .__pr_advancedSummary::before{transform:rotate(45deg) translate(-1px,-1px)}" +
+      ".__pr_advancedSummary:hover{color:var(--dsw-alias-label-primary)}" +
+      ".__pr_advancedBody{display:flex;flex-direction:column;gap:12px;padding-top:12px}" +
+      ".__pr_modelList{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto;padding-right:4px}" +
+      ".__pr_modelRow{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}" +
+      ".__pr_modelMain{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}" +
+      ".__pr_modelName{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".__pr_modelProvider{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".__pr_empty{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);font-style:italic;padding:8px 0;margin:0}" +
+      ".__pr_unavailable{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}";
     var tagId = "picturereader/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"" + tagId + "\"]") === null) {
       var tag = document.createElement("style");
@@ -237,7 +264,8 @@ window.__ModuleLoader__.load({
             }
           }
         }
-        // Initial load from server (some DSH versions don't have load())
+        // Initial load: prefer scope.load() when the host provides it, else a
+        // plain getSnapshot read (compatible with EAC hosts without load).
         if (typeof scope.load === "function") {
           scope.load().then(function () {
             if (alive) syncFromScope();
@@ -326,35 +354,34 @@ window.__ModuleLoader__.load({
         return entry ? (entry.note || "") : "";
       };
 
-      return h("div", { className: "__pr_field" },
-        h("span", { className: "__pr_label" }, t("visionBridgeModels")),
-        h("span", { className: "__pr_hint" }, t("visionBridgeModelsHint")),
-        available.length === 0
-          ? h("p", { className: "__pr_empty" }, t("noModels"))
-          : h("div", { className: "__pr_modelList" },
-              available.map(function (m) {
-                var key = m.provider + "/" + m.id;
-                var checked = isSelected(m);
-                return h("div", { key: key, className: "__pr_modelRow" },
-                  h("input", {
-                    className: "__pr_check",
-                    type: "checkbox",
-                    checked: checked,
-                    onChange: function () { toggleModel(m); },
-                  }),
+      // 标题与说明由外层卡片渲染，这里只负责模型勾选列表。
+      return available.length === 0
+        ? h("p", { className: "__pr_empty" }, t("noModels"))
+        : h("div", { className: "__pr_modelList" },
+            available.map(function (m) {
+              var key = m.provider + "/" + m.id;
+              var checked = isSelected(m);
+              return h("div", { key: key, className: "__pr_modelRow" },
+                h("input", {
+                  className: "__pr_check",
+                  type: "checkbox",
+                  checked: checked,
+                  onChange: function () { toggleModel(m); },
+                }),
+                h("div", { className: "__pr_modelMain" },
                   h("span", { className: "__pr_modelName" }, m.name || m.id),
-                  h("span", { className: "__pr_modelProvider" }, m.provider),
-                  checked ? h("input", {
-                    className: "__pr_inputSmall",
-                    type: "text",
-                    value: noteOf(m),
-                    placeholder: t("visionBridgeNotePH"),
-                    onChange: function (e) { setNote(m, e.target.value); },
-                  }) : null
-                );
-              })
-            )
-      );
+                  h("span", { className: "__pr_modelProvider" }, m.provider)
+                ),
+                checked ? h("input", {
+                  className: "__pr_inputSmall",
+                  type: "text",
+                  value: noteOf(m),
+                  placeholder: t("visionBridgeNotePH"),
+                  onChange: function (e) { setNote(m, e.target.value); },
+                }) : null
+              );
+            })
+          );
     }
 
     function tOf(props) { return props.t; }
@@ -458,7 +485,13 @@ window.__ModuleLoader__.load({
         });
         Promise.all(writes).then(function () {
           setBusy(false); setNotice(t("saved"));
-          if (scope.load) scope.load();
+          // 保存后刷新本机 snapshot：优先走宿主 load（若提供），否则直接
+          // 读 getSnapshot（兼容无 load 的 EAC 宿主）。
+          if (typeof scope.load === "function") {
+            scope.load();
+          } else {
+            try { setSnapshot(scope.getSnapshot()); } catch (_e) {}
+          }
         }).catch(function (e) {
           setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
         });
@@ -468,56 +501,53 @@ window.__ModuleLoader__.load({
         Promise.all(FIELDS.filter(function (f) { return f.type !== "models"; }).map(function (f) { return scope.unset(f.key); })).then(function () {
           setBusy(false); setNotice(t("saved"));
           setTimeout(function () {
-            var fresh = scope.getSnapshot();
-            if (fresh.status === "ready" && fresh.value !== void 0) setDraft(Object.assign({}, valueToDraft(fresh.value)));
+            if (typeof scope.load === "function") {
+              scope.load().then(function () {
+                var fresh = scope.getSnapshot();
+                if (fresh.status === "ready" && fresh.value !== void 0) setDraft(Object.assign({}, valueToDraft(fresh.value)));
+              }).catch(function () {});
+            } else {
+              var fresh = scope.getSnapshot();
+              if (fresh.status === "ready" && fresh.value !== void 0) setDraft(Object.assign({}, valueToDraft(fresh.value)));
+            }
           }, 120);
         }).catch(function (e) { setBusy(false); setError(t("error") + ": " + String(e && e.message || e)); });
       }
 
       function renderField(f) {
-        // Vision models picker (custom component, not a standard field)
-        if (f.type === "models") {
-          return h(VisionBridgePicker, { key: f.key, t: t, scope: scope });
-        }
-        // VLM fields hidden unless vlm_enabled checked
-        if (f.key.indexOf("vlm_") === 0 && f.key !== "vlm_enabled") {
-          var vlmOn = draft["vlm_enabled"] !== void 0 ? !!draft["vlm_enabled"] : Boolean(value["vlm_enabled"]);
-          if (!vlmOn) return null;
-        }
         if (f.type === "checkbox") {
           var checked = !!fieldDraft(f);
           return h("label", { key: f.key, className: "__pr_field" },
-            h("span", { className: "__pr_row" },
+            h("span", { className: "__pr_label" },
               h("input", { className: "__pr_check", type: "checkbox", checked: checked, onChange: function (e) { setField(f, e.target.checked); } }),
-              h("span", { className: "__pr_label" }, t(FIELD_LABELS[f.key]))
+              h("span", null, t(FIELD_LABELS[f.key]))
             ),
-            f.hintKey ? h("span", { className: "__pr_hint" }, t(f.hintKey)) : null
+            f.hintKey ? h("p", { className: "__pr_hint" }, t(f.hintKey)) : null
           );
         }
         if (f.type === "mode") {
           return h("label", { key: f.key, className: "__pr_field" },
             h("span", { className: "__pr_label" }, t("mode")),
             h("select", {
-              className: "__pr_select",
+              className: "__pr_input",
               value: fieldDraft(f) || "smart",
               onChange: function (e) { setField(f, e.target.value); },
             }, MODE_OPTS.map(function (o) {
               return h("option", { key: o.value, value: o.value }, t(o.labelKey));
             })),
-            h("span", { className: "__pr_hint" }, t("modeHint"))
+            h("p", { className: "__pr_hint" }, t("modeHint"))
           );
         }
         if (f.type === "ocr") {
           return h("label", { key: f.key, className: "__pr_field" },
             h("span", { className: "__pr_label" }, t("ocr")),
             h("select", {
-              className: "__pr_select",
+              className: "__pr_input",
               value: fieldDraft(f) || "windows",
               onChange: function (e) { setField(f, e.target.value); },
             }, OCR_OPTS.map(function (o) {
               return h("option", { key: o.value, value: o.value }, t(o.labelKey));
-            })),
-            h("span", { className: "__pr_hint" }, null)
+            }))
           );
         }
         return h("label", { key: f.key, className: "__pr_field" },
@@ -529,26 +559,46 @@ window.__ModuleLoader__.load({
             placeholder: f.placeholderKey ? t(f.placeholderKey) : (f.type === "password" ? (value[f.key] ? "••••••••" : t("vlmKeyHint")) : ""),
             onChange: function (e) { setField(f, e.target.value); },
           }),
-          f.hintKey ? h("span", { className: "__pr_hint" }, t(f.hintKey)) : null
+          f.hintKey ? h("p", { className: "__pr_hint" }, t(f.hintKey)) : null
         );
       }
 
-      var primary = FIELDS.filter(function (f) { return !f.advanced; });
+      var vlmHidden = draft["vlm_enabled"] !== void 0 ? !draft["vlm_enabled"] : !value["vlm_enabled"];
+      var vlmFields = FIELDS.filter(function (f) { return f.key.indexOf("vlm_") === 0 && f.key !== "vlm_enabled"; });
       var advanced = FIELDS.filter(function (f) { return f.advanced; });
-      return h("div", { className: "__pr_root" },
-        h("p", { className: "__pr_hint", style: { margin: "0 0 4px" } }, t("intro")),
-        primary.map(renderField),
+
+      return h("div", { className: "__pr_section" },
+        h("p", { className: "__pr_intro" }, t("intro")),
+        // 使用模式（自带 label，无需卡片标题）
+        h("div", { className: "__pr_card" }, renderField(FIELDS[0])),
+        // 视觉桥模型
+        h("div", { className: "__pr_card" },
+          h("h3", { className: "__pr_cardTitle" }, t("visionBridgeModels")),
+          h("p", { className: "__pr_subHint" }, t("visionBridgeModelsHint")),
+          h(VisionBridgePicker, { t: t, scope: scope })
+        ),
+        // 外部视觉 API
+        h("div", { className: "__pr_card" },
+          renderField(FIELDS[2]),
+          vlmHidden ? null : h("div", { className: "__pr_advancedBody" },
+            vlmFields.map(function (f) {
+              return renderField(f);
+            })
+          )
+        ),
+        // OCR 引擎（自带 label，无需卡片标题）
+        h("div", { className: "__pr_card" }, renderField(FIELDS[7])),
+        // 高级设置
         advanced.length ? h("details", { className: "__pr_advanced" },
-          h("summary", { className: "__pr_advancedSummary" },
-            h("span", null, t("advanced")),
-            h("span", { className: "__pr_advancedArrow" }, "\u25b8")
-          ),
-          advanced.map(renderField)
+          h("summary", { className: "__pr_advancedSummary" }, t("advanced")),
+          h("div", { className: "__pr_advancedBody" },
+            advanced.map(renderField)
+          )
         ) : null,
         h("div", { className: "__pr_actions" },
           h("button", { type: "button", className: "__pr_btn __pr_btnPrimary", onClick: onSave, disabled: busy || !snapshot.writable }, t("save")),
-          h("button", { type: "button", className: "__pr_btn", onClick: onReset, disabled: busy || !snapshot.writable }, t("reset")),
-          notice ? h("span", { className: "__pr_status" }, notice) : null,
+          h("button", { type: "button", className: "__pr_btn __pr_btnSecondary", onClick: onReset, disabled: busy || !snapshot.writable }, t("reset")),
+          notice ? h("span", { className: "__pr_saved" }, notice) : null,
           busy ? h("span", { className: "__pr_status" }, t("saving")) : null,
           error ? h("span", { className: "__pr_error" }, error) : null
         )
