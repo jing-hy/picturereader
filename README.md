@@ -5,7 +5,7 @@
 >
 > **v3.3.0 新增**：**macOS 原生 Vision OCR 引擎**（`engine="macos"`，`scripts/setup-macos.mjs` 一键编译，PR #4 合入）；OCR 引擎选项按平台条件显示（macos 仅 macOS、windows 仅 Windows，paddle/rapid 跨平台始终显示）；修复 PaddleOCR 新环境首次调用三个缺陷（stdout 污染 / w/h→width/height / 缓存路径写死，issue #2）；设置卡 UI 重做（settings-panel 设计语言）；调试日志门控（llm/stream 桥不再刷屏）；peerDependencies 兼容 DSH 0.1.1-rc.2（issue #3）。
 
-[![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+[![dsh-plugin](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) [![dsh.so security](https://www.dsh.so/badge/picturereader.svg)](https://www.dsh.so/artifact/picturereader) [![dsh.so install](https://www.dsh.so/badge/install/picturereader.svg)](https://www.dsh.so/artifact/picturereader)
 
 ---
 
