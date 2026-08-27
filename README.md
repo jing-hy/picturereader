@@ -407,7 +407,11 @@ await main()
 
 ## 版本更新日志
 
-### v3.3.0（本次）
+### v3.3.1（本次）
+
+- 元数据修正：npm `description` 中 OCR 引擎数量更正为 ×4（windows / macos / paddle / rapid）。
+
+### v3.3.0
 
 - **新增 macOS 原生 Vision OCR 引擎**：`engine="macos"`（`scripts/macos-ocr.swift` + `scripts/setup-macos.mjs` 一键编译，默认中文优先、BCP-47 language 参数、像素坐标框契约与 paddle/rapid 一致），供 macOS 用户零第三方依赖使用（PR #4 合入）。
 - **OCR 引擎按平台条件显示**：设置卡 `windows` 引擎仅 Windows、`macos` 引擎仅 macOS（paddle/rapid 跨平台始终显示），未配置时默认平台原生引擎；跨平台迁移旧配置自动回落。
