@@ -1,7 +1,9 @@
 # picturereader
 
-> **v3.1.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档」能力：**粘贴即用、原生缩略图**。
-> 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）与**可选外部 VLM 桥**。一个插件全包，无需另装。
+> **v3.2.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档 / 修图」能力。
+> 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×3 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）、**本地修图工具 `image_edit`**（Pillow/OpenCV 纯 CPU：缩放 / 旋转 / 滤镜 / 合成 / 水印 / 去背景 / 超分等）与**可选外部 VLM 桥**。一个插件全包。
+>
+> **v3.2.0 新增**：`image_edit` 本地修图工具 — 22 种纯 CPU 图像处理动作（Pillow + OpenCV，可选 rembg/rawpy/realesrgan），无需 GPU / 大模型。
 >
 > **v3.1.0 新增**：`read_image` 工具拦截 — 当 LLM 调用 DSH 内置的 `read_image` 工具时，如果返回了 image block，会自动替换为文本引导，避免后续请求因 image block 导致 `UNSUPPORTED_CONTENT` 错误。内置 `image-reading` 技能注册。
 
@@ -15,10 +17,11 @@ DeepSeek 等纯文本模型没有视觉编码器，无法直接看图片；DSH �
 
 > ⭐ **已支持外部视觉 API（OpenAI 兼容端点 / LM Studio / 云端 VLM），由 LLM 自行按需调用**：配置好端点后，模型会在智能/严谨模式下自主判断"这张图值不值得外呼视觉模型"，需要时用 `vision_analyze` 调外部 API 做语义理解，简单内容则本地像素/OCR 搞定——**外部 API 是即插即用的增强能力，不是必须依赖**。
 
-picturereader 解决两件事：
+picturereader 现在解决三件事：
 
 1. **把「看图/读文档」翻译成纯文本模型能理解的结构化证据**（像素级 huel/结构/材质分析 + OCR 实读 + 可选 VLM 语义描述），并沉淀为读图方法论 skill。
 2. **通过「视觉孪生 adapter」让纯文本模型在 DSH 里获得原生缩略图体验**：勾选模型即生成「(视觉)」变体，粘贴图片显示原生缩略图、图片块进会话、并被自动分析成文本路径 + 本地证据再交给模型——模型拿到的永远是纯文本，不会触发 `UNSUPPORTED_CONTENT`。
+3. **本地直接修图 / 批量处理图片**：`image_edit` 提供缩放、旋转、滤镜、合成、水印、去背景、拼接、透视校正等纯 CPU 动作，图片不出本机。
 
 > **版本兼容性**：本版本专门兼容 **dsh 0.1.1-rc.2** 及 **dsheac 5.1.0**，已针对这两个版本进行适配测试与优化，确保稳定运行。同时兼容 DeepSeek Harness EAC 4.2.0 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。
 
@@ -64,7 +67,7 @@ picturereader 解决两件事：
 **🕶 隐私模式（Privacy）——零外呼硬门禁**
 - **绝不调用**任何外部视觉端点，即使你在设置卡配了 API。
 - 约束是 host 侧强制：`runtime.js` 使 `isVlmConfigured()` 恒为 `false`，`vision_analyze` 强制 `include_vlm=false`，视觉孪生 `stream` 的降级文本也明确"只用本地工具"。
-- 模型只能用本地工具：`image_scan` / `image_ocr` / `image_sample` / `image_crop` / `image_palette` / `image_compare`。图片字节不出本机。
+- 模型只能用本地工具：`image_scan` / `image_ocr` / `image_sample` / `image_crop` / `image_palette` / `image_compare` / `image_edit`。图片字节不出本机。
 - 适用：敏感图片（身份证、合同、私人截图）、离线、零外部流量审计场景。
 
 **⚡ 智能模式（Smart）——省轮数、省时间（默认）**
@@ -87,7 +90,7 @@ picturereader 解决两件事：
 
 三模式不仅约束 `vision_analyze`，也约束视觉孪生 `registerTwinAdapters` 的 `stream` 拦截：图片块总是被**无条件**替换成文本（路径 + 本地证据引导，这是模型能读懂的前提），但**是否/何时进一步外呼 VLM** 由当前模式决定——隐私模式恒不透传图片、不发起外部调用；智能/严谨模式在需要且已配置时才走外部语义理解。因此"原生缩略图"与"隐私零外呼"可以同时成立，互不冲突。
 
-### ③ 本地工具链（纯本地、纯 JS 像素级）
+### ③ 本地工具链（纯本地读取）
 
 | 工具 | 作用 |
 |---|---|
@@ -119,13 +122,65 @@ Web 设置页注册「图片阅读」卡片：使用模式、外部视觉 API、
 
 开启视觉孪生并选择「(视觉)」模型变体后：粘贴/拖入图片 → 原生缩略图 → 图片块进会话 → 被孪生 `stream` 拦截 → 导出文本路径 + 本地证据 → 纯文本模型拿到结果，可继续用 `image_scan` / `image_ocr` 深挖。
 
+### ⑧ 本地修图工具 `image_edit`（v3.2.0 新增）
+
+一个工具、多个 action 分发，后端为隔离的 `image_venv` Python（Pillow + OpenCV-headless，可选 rembg / rawpy / realesrgan CLI），**纯 CPU、无需 GPU / 大模型**。所有图片字节不出本机。
+
+> 依赖安装：`node scripts/setup-image-venv.mjs`（核心）/ `node scripts/setup-image-venv.mjs --full`（再加 rembg + rawpy）。详见下方专门章节。
+
+## image_edit 本地修图工具
+
+本地批量 / 单张修图。调用示例：
+
+```text
+用 image_edit 把 <路径> 缩放到宽 800：action=resize, file_path=<路径>, width=800, height=600
+给 <路径> 加左下角文字水印：action=watermark, file_path=<路径>, type=text, text="©2026", position=bottom_left, font_size=40
+把 <背景> 和 <前景> 合成（贴图）：action=composite, file_path=<背景>, file_paths=[<前景>], position=bottom_right, alpha=0.8
+把 <IMG1>、<IMG2> 水平拼接：action=stitch, file_path=<IMG1>, file_paths=[<IMG2>], direction=horizontal
+```
+
+### 支持的 action（P0 / P1 / P2）
+
+| 分级 | action | 说明 | 依赖 |
+|---|---|---|---|
+| **P0** | `resize` | 缩放：`width,height` + `mode`（stretch/fit/fill） | Pillow |
+| **P0** | `rotate` | 旋转：`angle`（度）+ `expand` + `fill` | Pillow |
+| **P0** | `flip` | 翻转：`axis`（horizontal/vertical/both） | Pillow |
+| **P0** | `convert` | 格式互转：png/jpg/webp/bmp/tiff/gif（由 out 扩展名决定） | Pillow |
+| **P0** | `adjust` | 亮度/对比度/饱和度：`brightness,contrast,saturation`（1.0=不变） | Pillow |
+| **P0** | `blur` | 模糊：`type`（gaussian/box/motion）+ `radius` | Pillow |
+| **P0** | `sharpen` | 锐化：`radius,percent,threshold`（UnsharpMask） | Pillow |
+| **P0** | `composite` | 合成/叠加（贴图）：主图叠加 `file_paths[0]` 于 `position` 与 `alpha` | Pillow |
+| **P0** | `watermark` | 水印：`type=text`（`text,color,font_size`）或 `type=image`（`file_paths[0]`） | Pillow |
+| **P0** | `thumbnail` | 缩略图：`width,height`（保持比例） | Pillow |
+| **P1** | `edges` | 边缘检测/描边：`low,high`（Canny） | OpenCV |
+| **P1** | `equalize_hist` | 直方图均衡化（增强对比度）：`mode`（auto/clahe） | OpenCV |
+| **P1** | `denoise` | 降噪：`strength`（fastNlMeansDenoisingColored，纯 CPU） | OpenCV |
+| **P1** | `perspective` | 透视校正（矫正歪斜文档/建筑照）：`points`（8 数）+`width,height` | OpenCV |
+| **P1** | `stitch` | 多图拼接：`direction`（horizontal/vertical）+ `file_paths` | Pillow |
+| **P1** | `remove_background` | 背景移除：U²-Net（`--full` 装 rembg，约 35MB，CPU 几十秒） | rembg |
+| **P2** | `exif_read` | 读取 EXIF（Make/Model/曝光等） | Pillow |
+| **P2** | `exif_write` | 写 EXIF：`fields`（标签名→值） | Pillow |
+| **P2** | `raw_convert` | RAW 转图：`rawpy`（基于 libraw，`--full` 装） | rawpy |
+| **P2** | `upscale` | 超分辨率放大 2–4x：realesrgan-ncnn-vulkan 独立 CLI（Vulkan，无需 PyTorch） | 外部 CLI |
+| **P2** | `colorspace` | 色彩空间：`target`（rgb/hsv/lab/gray/cmyk） | OpenCV |
+| **P2** | `morphology` | 形态学：`op`（erode/dilate/open/close/gradient）+`size` | OpenCV |
+
+### 依赖与降级策略
+
+- **P0 全部**仅需 Pillow；**P1 除 remove_background 外**仅需 OpenCV-headless。
+- `remove_background` 需要 rembg（`--full`）；`raw_convert` 需要 rawpy（`--full`）；`upscale` 需要外部 realesrgan-ncnn-vulkan CLI（环境变量 `DSH_REALESRGAN_EXE`）。
+- 可选依赖缺失时，**不是崩溃**，而是返回清晰的中文提示（"请先运行 `node scripts/setup-image-venv.mjs [--full]`" / "请设置 DSH_REALESRGAN_EXE"）。
+- `image_venv` Python 未搭建时，工具返回 `node scripts/setup-image-venv.mjs` 安装提示（与 document_to_image 的 doc_venv 一致）。
+- 全部动作默认超时 120s；`remove_background` 300s；`upscale` / `denoise` 更长，避免后台阻塞。
+
 ## 与主流多模态插件的差异 / 优势
 
 对比常见方案（`dsh-tool-vision`、`dsh-image-paste`、`dsh-vision-bridge` 等）：
 
 1. **不绑定单一厂商**：视觉孪生对任意 provider 生效（含 `opencode-go` / xiaomi / qiu 等 pi-ai 系），不是只适配某一家 API。
 2. **全链路可离线**：隐私模式零外呼；本地纯 JS 像素工具 + 3 引擎 OCR，不依赖云端。
-3. **工具链完整**：裁剪 / 取色 / 对比 / 批量 / 文档转图，一个插件全覆盖。
+3. **工具链完整**：裁剪 / 取色 / 对比 / 批量 / 文档转图 / **本地修图 image_edit**，一个插件全覆盖。
 4. **原生缩略图**：真正 DSH 原生图片块（`inputModalities` 声明），非文本路径模拟。
 5. **快**：本地工具毫秒级；可控 VLM 调用（低信息拦截 + 智能模式"值得才调"）省轮数与耗时。
 6. **只写不读 key、隐私硬门禁**：API Key 以 `role:'secret'` 保存、只写不读不回显；隐私模式经 `runtime.js` 强制 `isVlmConfigured()=false`。
@@ -136,6 +191,7 @@ Web 设置页注册「图片阅读」卡片：使用模式、外部视觉 API、
 | 任意 provider（含 pi-ai 系） | ✅ | 绑定厂商 | — | — |
 | 隐私模式硬门禁 | ✅ | — | — | ❌ |
 | 本地像素工具链（scan/ocr/crop/palette/compare） | ✅ 全内置 | ⚠️ 基础 | ❌ | ❌ |
+| 本地修图（缩放/滤镜/水印/去背景等） | ✅ image_edit | ❌ | ❌ | ❌ |
 | 文档转图片（pdf/word/excel/ppt） | ✅ | ❌ | ❌ | ❌ |
 | 批量/上下文验证 | ✅ | ❌ | ❌ | ❌ |
 | 外部 VLM 桥（可选，OpenAI 兼容） | ✅ | ✅ | ❌ | ✅ |
@@ -159,9 +215,13 @@ node scripts/setup-macos.mjs     # macOS 原生 Vision OCR（仅 macOS，需 Xco
 
 # 4.（可选）文档转图片依赖（需已装 LibreOffice）
 node scripts/setup-doc-venv.mjs  # 建 doc_venv 装 PyMuPDF
+
+# 5.（可选）本地修图 image_edit 依赖
+node scripts/setup-image-venv.mjs          # 建 image_venv 装 Pillow + OpenCV-headless + piexif
+node scripts/setup-image-venv.mjs --full   # 再加 rembg（背景移除）+ rawpy（RAW）
 ```
 
-重启 DSH Desktop 后：模型工具列表出现全部工具，设置页出现「图片阅读」卡片。
+重启 DSH Desktop 后：模型工具列表出现全部工具（含 `image_edit`），设置页出现「图片阅读」卡片。
 
 ### 启用视觉孪生（原生缩略图）
 
@@ -174,14 +234,15 @@ node scripts/setup-doc-venv.mjs  # 建 doc_venv 装 PyMuPDF
 ```text
 用 image_scan 看一下 <路径> 这张图，细看感兴趣的部分
 （复杂场景可接着用 vision_analyze；如有文字先 image_ocr；一批图用 image_batch；
-  文档用 document_to_image 逐页转成图片再看）
+  文档用 document_to_image 逐页转成图片再看；
+  要修改图片用 image_edit，如 action=resize / watermark / remove_background）
 ```
 
 ## Code Mode（工具折叠）兼容说明
 
 DSH 的 `tools` 呈现有三种 `mode`：`native`（默认，模型可直呼所有工具）、`code`（只允许模型直呼 `run_code`，其它工具折叠进 `run_code` 的生成 SDK 内调用）、`both`（两种都能用）。
 
-- **picturereader 所有工具与 mode 无关**：`native` / `both` 下全部可直呼；`code` 下也**完全可用**，只是要经 `run_code` 程序内调用（`await tools.image_scan(...)` / `await tools.vision_analyze(...)`）。工具会被自动投影进 `run_code` 生成的 SDK，一个都不少。
+- **picturereader 所有工具与 mode 无关**：`native` / `both` 下全部可直呼；`code` 下也**完全可用**，只是要经 `run_code` 程序内调用（`await tools.image_scan(...)` / `await tools.image_edit(...)` / `await tools.vision_analyze(...)`）。工具会被自动投影进 `run_code` 生成的 SDK，一个都不少。
 - **若报错** `Error: unknown tool "vision_analyze" ... only run_code is callable directly ...`——这不是插件坏了，而是当前会话处于 `code` 模式、仍以直呼方式发起了调用。两种情况任选其一：
   1. 把该部署的 `tools.mode` 设为 `both`（最省心：直呼 + run_code 都能用，不会降速）；
   2. 保持 `code` 模式，改用 `run_code` 程序调用（见下方示例）。
@@ -203,7 +264,7 @@ await main()
 
 | 模式 | 是否调用外部视觉 API | 模型行为引导 | 适用场景 |
 |---|---|---|---|
-| **隐私模式** | **绝不调用**（即使配置了 API） | 只走本地工具：image_scan / image_ocr / image_sample / image_crop / image_palette / image_compare | 敏感图片、离线、零外部流量 |
+| **隐私模式** | **绝不调用**（即使配置了 API） | 只走本地工具：image_scan / image_ocr / image_sample / image_crop / image_palette / image_compare / image_edit | 敏感图片、离线、零外部流量 |
 | **智能模式**（默认） | 允许，但先本地看图再决定 | 先 `image_scan` 快速看，文字→OCR、简单图→本地、复杂图才 `vision_analyze` 外呼 | 日常，省轮数与耗时 |
 | **严谨模式** | 允许 | 自行选择路线 + 多证据交叉验证 + 细看细节 | 需要高准确率与可追溯的场景 |
 
@@ -242,6 +303,13 @@ await main()
 
 ## 环境变量
 
+### 本地修图 image_edit（选装，Pillow+OpenCV）
+
+| 变量 | 默认值 | 作用 |
+|---|---|---|
+| `DSH_IMAGE_PYTHON` | `C:\Users\Administrator\image_venv\Scripts\python.exe` | image_edit 后端 venv 解释器路径（Pillow/OpenCV） |
+| `DSH_REALESRGAN_EXE` | `realesrgan-ncnn-vulkan` | 超分 CLI 可执行路径（`upscale` 用，Vulkan） |
+
 ### OCR（选装）
 
 | 变量 | 默认值 | 作用 |
@@ -274,9 +342,11 @@ await main()
 
 - **DSH attachment 单图默认约 5MB**：超大图片可能被宿主上传限制拦截；工具端的 `max_image_bytes`（默认 50MB）是读取上限。
 - **原生缩略图需启用视觉孪生**：文本模型默认不被 DSH 视为「支持图片」，需在设置卡勾选生成「(视觉)」变体并重启。
-- **WebP 暂不支持**：`image_scan` / `vision_analyze` 等对 WebP 报错，请先转成 PNG / JPEG。
+- **WebP 暂不支持**：`image_scan` / `vision_analyze` 等对 WebP 报错，请先转成 PNG / JPEG；`image_edit` 的 `convert` 可把 WebP 转成 PNG/JPEG。
+- **`image_edit` 部分动作需可选依赖**：`remove_background`（rembg）、`raw_convert`（rawpy）、`upscale`（realesrgan CLI）需 `--full` 安装或外部 CLI；缺失时返回安装提示而非崩溃。
+- **rembg 首次运行需联网下载 U²-Net 模型**：约 35–176MB，缓存于 `~/.u2net`；之后离线可用。
 - **视觉桥模型勾选需重启 DSH** 生效（`vision_models` 的改动不会热加载）。
-- **`dsh-file-drop` 需停用**：其「拖入图片即注入文本」与视觉孪生/图片桥的自动分析可能冲突（重复/竞争注入），建议在对应 profile 停用；原生缩略图 + 图片桥自动分析已覆盖该需求。**v3.1.0 修复**：增强了与 `dsh-file-drop` 的兼容性，当检测到冲突时会自动降级处理。
+- **`dsh-file-drop` 需停用**：其「拖入图片即注入文本」与视觉孪生/图片桥的自动分析可能冲突（重复/竞争注入），建议在对应 profile 停用；原生缩略图 + 图片桥自动分析已覆盖该需求。
 - **外部 VLM 依赖网络/端点**：未配置端点或离线时自动跳过并给出提示；隐私模式恒不调用。
 
 ## 拖拽上传问题排查
@@ -294,6 +364,16 @@ await main()
 5. **重启 DSH**：某些配置更改需要重启 DSH 才能生效。
 
 ## 测试情况
+
+### v3.2.0 测试
+
+- `tests/image-edit.test.js`：8 项 node:test 单测通过——action 校验、缺输入、request JSON 构造（action/from/from_extra/out/参数）、默认/动作专属超时、错误透传。
+- 后端 `scripts/image-edit.py` 端到端冒烟（Pillow 12 + OpenCV 4.13）：**24/24 通过**，覆盖 resize(stretch/fit) / rotate / flip / convert(jpg/webp) / adjust / blur / sharpen / composite / watermark(text+image) / thumbnail / edges / equalize_hist(auto+clahe) / denoise / perspective / colorspace(gray/hsv/lab) / morphology / exif_read / 未知 action 负例。
+- 既有的读图工具链、三模式、视觉孪生、document_to_image 测试保持通过。
+
+### v3.1.0 集成测试
+
+内置 `node:test` 单测（工具、三模式、桥）+ 真实素材集成测试通过：本地工具链、文档转图片（pdf/docx/pptx/xlsx）、外部 VLM 真调通路（LM Studio）、三模式路由、视觉孪生 Proxy 均验证通过（24/24）。
 
 ### v3.0.3 集成测试（2026-08-20）
 
@@ -316,21 +396,26 @@ await main()
 | 视觉孪生 adapter | ✅ | 3 个 provider 激活 |
 | 设置持久化 | ✅ | vision_models / ocr_engine / mode 全部保留 |
 
-### v3.0.6 修复
+## 版本更新日志
 
-- **依赖安装完整性修复**：修复了 picturereader 安装后图像分析功能（scan / ocr / vision）静默失败的问题。根因是 npm install 未完整执行，`jpeg-js`、`omggif`、`pngjs` 三个运行时依赖没有正确安装到 `node_modules/` 目录下，导致 `core.js` 顶层 import 失败。修复方案：在内置插件打包时预装依赖，确保 `node_modules/` 随插件一起分发。
+### v3.2.0（本次）
 
-### v3.0.5 修复
+- **新增 `image_edit` 本地修图工具**：22 种纯 CPU 动作（Pillow + OpenCV-headless，可选 rembg / rawpy / realesrgan CLI）——P0 基础（resize/rotate/flip/convert/adjust/blur/sharpen/composite/watermark/thumbnail）、P1 进阶（edges/equalize_hist/denoise/perspective/stitch/remove_background）、P2 高级（exif_read/write/raw_convert/upscale/colorspace/morphology）。
+- 新增 `scripts/setup-image-venv.mjs`（`--full` 装 rembg+rawpy）与 `scripts/image-edit.py` 后端。
+- 新增环境变量 `DSH_IMAGE_PYTHON` / `DSH_REALESRGAN_EXE`。
+- 新增 `tests/image-edit.test.js` 单测 8 项 + 后端 24/24 冒烟，全部通过。
 
-- **scope.load() 兼容性修复**：修复了在某些 DSH 版本中设置页「图片阅读」卡片打开空白的问题。根因是 `client.js` 直接调用 `scope.load()` 但该宿主版本的 `settingsScope` API 没有 `load` 方法（只有 getSnapshot/subscribe/set/unset），导致组件渲染时抛出 `TypeError: scope.load is not a function`。修复方案：在调用前检查 `typeof scope.load === "function"`，不存在时直接从 `scope.getSnapshot()` 读取。
+### v3.1.x（前版）
 
-### v3.0.3 修复
+- **v3.1.0**：新增 `read_image` 工具拦截（避免 image block 触发 `UNSUPPORTED_CONTENT`）；内置 `image-reading` 技能注册；内置依赖安装完整性修复落地。
 
-- **视觉桥模型列表持久化修复**：修复了设置页「视觉桥模型」勾选后重新打开设置丢失勾选状态的问题。根因是 `settings/document-updated` 事件触发 `scope.load()` 覆盖本地修改，改为通过 `lastSavedRef` 跟踪保存值，跳过同步覆盖。
-- **OCR 引擎/模式设置持久化修复**：修复了 `ocr_engine` 和 `mode` 等 select 字段修改后重新打开设置恢复默认的问题。根因是 `onSave` 函数未正确处理 select 类型字段的默认值回退。
-- **cordis 4 兼容性修复**：修复了 `image-batch.js` 和 `doc-tools.js` 中访问未声明 `ctx` 属性导致的报错。
-- **PaddleOCR 字段名修复**：`w/h` 字段改为 `width/height` 以匹配 schema。
-- **本地 VLM 端点检测修复**：`isManagedEndpoint` 扩展为识别所有 `127.0.0.1`/`localhost` 地址，不再要求 API key。
+### v3.0.x（前版）
+
+- **v3.0.6**：修复依赖安装完整性（`jpeg-js`/`omggif`/`pngjs` 随插件预装），图析功能不再静默失败。
+- **v3.0.5**：修复 `scope.load()` 兼容（设置页「图片阅读」空白）。
+- **v3.0.4**：Code Mode 工具折叠兼容说明。
+- **v3.0.3**：设置持久化修复、PaddleOCR 字段名、本地 VLM 端点检测、cordis4 兼容。
+- **v3.0.0**：视觉孪生 adapter、三模式路由、本地工具链、文档转图片、3 引擎 OCR、设置卡。
 
 ## 开发 / 仓库布局
 
@@ -342,6 +427,7 @@ node scripts/setup-ocr.mjs     # 可选
 node scripts/setup-rapid.mjs   # 可选
 node scripts/setup-macos.mjs   # 可选（仅 macOS）
 node scripts/setup-doc-venv.mjs# 可选（文档转换）
+node scripts/setup-image-venv.mjs  # 可选（本地修图 image_edit，--full 加 rembg/rawpy）
 node scripts/preview.mjs       # 生成 fixtures 并预览渲染
 ```
 

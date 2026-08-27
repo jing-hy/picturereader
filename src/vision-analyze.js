@@ -65,8 +65,8 @@ export function createVisionAnalyzeTool(ctx) {
   return {
     name: 'vision_analyze',
     description: [
-      'Unified image understanding: decode an image, run a low-information guard, optionally scan pixels, OCR text, and/or ask the VLM for a semantic description.',
-      'Use this when you need one call to both verify what is in the image and get a natural-language interpretation.',
+      'PREFERRED over read_image for text-only models: Unified image understanding: decode an image, run a low-information guard, optionally scan pixels, OCR text, and/or ask the VLM for a semantic description.',
+      'Use this instead of read_image when the model does not support image input. Use this when you need one call to both verify what is in the image and get a natural-language interpretation.',
       'Returns evidence blocks: scan (pixel stats), ocr (real text), vlm (model description). If low-information guard triggers and allow_low_info is false, it will not call the VLM.',
       'Supported formats: PNG, JPEG, GIF (first frame), BMP. WebP is not supported yet.',
       'VLM is optional: if SEE_BASE is not configured, VLM calls are skipped automatically.',
