@@ -109,8 +109,10 @@ window.__ModuleLoader__.load({
       vlmKeyEnv: "Key 环境变量（apiKey 为空时读取）",
       ocr: "默认 OCR 引擎",
       ocrWindows: "windows（系统内置，无需安装）",
+      ocrMacos: "macos（macOS 原生 Vision，免装第三方，首次需编译）",
       ocrPaddle: "paddle（PaddleOCR，对发光/弯曲/游戏文字更好）",
       ocrRapid: "rapid（RapidOCR，轻量快速，选装）",
+      debug: "调试日志（llm/stream 图片桥与模型缓存读取的诊断输出）",
       advanced: "高级设置",
       vlmTimeoutMs: "视觉请求超时（毫秒）",
       vlmMaxTokens: "视觉最大输出 Tokens",
@@ -158,8 +160,10 @@ window.__ModuleLoader__.load({
       vlmKeyEnv: "Key env var (used when apiKey empty)",
       ocr: "Default OCR Engine",
       ocrWindows: "windows (built-in, no install)",
+      ocrMacos: "macos (macOS built-in Vision, no third-party install; one-time compile)",
       ocrPaddle: "paddle (PaddleOCR, best for glowing/curved/game text)",
       ocrRapid: "rapid (RapidOCR, lightweight, optional)",
+      debug: "Debug logging (llm/stream bridge & model-cache reads)",
       advanced: "Advanced",
       vlmTimeoutMs: "Vision request timeout (ms)",
       vlmMaxTokens: "Vision max output tokens",
@@ -194,6 +198,7 @@ window.__ModuleLoader__.load({
     ];
     var OCR_OPTS = [
       { value: "windows", labelKey: "ocrWindows" },
+      { value: "macos", labelKey: "ocrMacos" },
       { value: "paddle", labelKey: "ocrPaddle" },
       { value: "rapid", labelKey: "ocrRapid" },
     ];
@@ -210,6 +215,7 @@ window.__ModuleLoader__.load({
       { key: "vlm_timeout_ms", type: "number", advanced: true, labelKey: "vlmTimeoutMs" },
       { key: "vlm_max_tokens", type: "number", advanced: true, labelKey: "vlmMaxTokens" },
       { key: "bridge_export_dir", type: "text", advanced: true, labelKey: "bridgeExportDir" },
+      { key: "debug", type: "checkbox", advanced: true, labelKey: "debug" },
       { key: "max_image_bytes", type: "number", advanced: true, labelKey: "maxImageBytes" },
       { key: "scan_default_size", type: "number", advanced: true, labelKey: "scanDefaultSize" },
       { key: "scan_palette", type: "text", advanced: true, labelKey: "scanPalette" },
@@ -221,7 +227,6 @@ window.__ModuleLoader__.load({
       { key: "batch_ocr_limit_chars", type: "number", advanced: true, labelKey: "batchOcrLimitChars" },
       { key: "doc_dpi", type: "number", advanced: true, labelKey: "docDpi" },
       { key: "doc_max_pages", type: "number", advanced: true, labelKey: "docMaxPages" },
-      { key: "debug", type: "checkbox", advanced: true, labelKey: "debug" },
     ];
     var FIELD_LABELS = {
       mode: "mode", vlm_enabled: "vlmEnabled", vlm_base: "vlmBase", vlm_model: "vlmModel", vlm_key: "vlmKey",

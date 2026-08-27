@@ -46,7 +46,7 @@ picturereader 解决两件事：
         → 读入当前「模式」→ 得到该模式的路由策略
         → 模型 / 工具按策略选路线：
             本地像素分析（image_scan / image_sample）
-            本地文字识别（image_ocr：windows / paddle / rapid）
+            本地文字识别（image_ocr：windows / macos / paddle / rapid）
             外部语义理解（vision_analyze include_vlm=true → VLM）
             交叉验证（多路证据对照）
 ```
@@ -92,7 +92,7 @@ picturereader 解决两件事：
 | 工具 | 作用 |
 |---|---|
 | `image_scan` | 全局/区域扫描：颜色网格 + regions 色块 + shade diversity + texture + structure + hue families；支持 `focus`/`region`/`px_per_cell` 定向放大 |
-| `image_ocr` | 文字识别**三引擎**：`windows`（内置）/ `paddle`（选装，发光/弯曲/游戏字更强）/ `rapid`（选装，轻量快速），失败自动降级不崩溃 |
+| `image_ocr` | 文字识别**四引擎**：`windows`（内置）/ `macos`（macOS 原生 Vision，免装第三方，首次一条命令编译）/ `paddle`（选装，发光/弯曲/游戏字更强）/ `rapid`（选装，轻量快速），paddle/rapid 缺失自动降级不崩溃 |
 | `image_sample` | N×N 精确像素取样，判断材质/纹理 |
 | `image_crop` | 按 region 裁剪并导出 PNG |
 | `image_palette` | 颜色提取：主色列表（hex + 命名单 + 占比）+ 色相家族 |
@@ -155,6 +155,7 @@ copy skills\image-reading.md %USERPROFILE%\.dsh\skills\          # Windows
 # 3.（可选）增强 OCR 引擎
 node scripts/setup-ocr.mjs       # PaddleOCR（发光/弯曲/游戏字更强）
 node scripts/setup-rapid.mjs     # RapidOCR（轻量快速）
+node scripts/setup-macos.mjs     # macOS 原生 Vision OCR（仅 macOS，需 Xcode 命令行工具）
 
 # 4.（可选）文档转图片依赖（需已装 LibreOffice）
 node scripts/setup-doc-venv.mjs  # 建 doc_venv 装 PyMuPDF
@@ -248,6 +249,7 @@ await main()
 | `DSH_PADDLE_PYTHON` | `C:\Users\Administrator\paddle_venv\Scripts\python.exe` | PaddleOCR 解释器路径 |
 | `DSH_PADDLE_CACHE` | `D:/coding/picturereader/.paddlex-cache` | PaddleX 模型缓存目录 |
 | `DSH_RAPID_PYTHON` | `C:\Users\Administrator\rapid_venv\Scripts\python.exe` | RapidOCR 解释器路径 |
+| `DSH_MACOS_OCR_BIN` | `~/.dsh/cache/picturereader/macos-ocr` | macOS Vision OCR 可执行文件路径（setup-macos.mjs 编译产物） |
 
 ### 文档转图片（选装）
 
@@ -338,6 +340,7 @@ npm install
 npm test                       # node:test
 node scripts/setup-ocr.mjs     # 可选
 node scripts/setup-rapid.mjs   # 可选
+node scripts/setup-macos.mjs   # 可选（仅 macOS）
 node scripts/setup-doc-venv.mjs# 可选（文档转换）
 node scripts/preview.mjs       # 生成 fixtures 并预览渲染
 ```

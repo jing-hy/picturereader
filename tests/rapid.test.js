@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { rapidAvailable, rapidPython, runRapidOcr, ocrImage } from '../src/core.js';
 import { createImageOcrTool } from '../src/tool.js';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'fixtures-out', 'ocr-test.png');
+const CHECKED_IN_FIXTURE = join(dirname(OUT), '..', 'fixtures', 'ocr-text.png');
+
+// Native-engine readiness (see ocr.test.js): degrade tests need a working
+// fallback engine on the current platform.
+const IS_DARWIN = process.platform === 'darwin';
+const MAC_OCR_READY = IS_DARWIN && (process.env.DSH_MACOS_OCR_BIN !== undefined || existsSync(join(homedir(), '.dsh', 'cache', 'picturereader', 'macos-ocr')));
+const NATIVE_ENGINE = IS_DARWIN ? 'macos' : 'windows';
+const NEED_MAC_BIN = IS_DARWIN && !MAC_OCR_READY ? 'macOS OCR binary not built — run: node scripts/setup-macos.mjs' : false;
 const RAPID_VENV = 'C:/Users/Administrator/rapid_venv/Scripts/python.exe';
 
 /** Whether the real rapid_venv is present on this machine (tests degrade otherwise). */
@@ -15,10 +24,17 @@ function haveRapidVenv() {
   return existsSync(RAPID_VENV) || existsSync('C:\\Users\\Administrator\\rapid_venv\\Scripts\\python.exe');
 }
 
-/** Generate the text-bearing test image once (PowerShell System.Drawing). */
+/**
+ * Provide the text-bearing test image. Cross-platform: reuse the checked-in
+ * CoreText fixture when present; fall back to PowerShell generation on Windows.
+ */
 function ensureOcrTestImage() {
   mkdirSync(dirname(OUT), { recursive: true });
   if (existsSync(OUT)) return;
+  if (existsSync(CHECKED_IN_FIXTURE)) {
+    copyFileSync(CHECKED_IN_FIXTURE, OUT);
+    return;
+  }
   const ps = [
     'Add-Type -AssemblyName System.Drawing',
     '$bmp = New-Object System.Drawing.Bitmap 900, 220',
@@ -93,7 +109,7 @@ function makeFakeCtx(bytes) {
 
 const EXEC = { signal: undefined, agent: { session: { header: { cwd: 'C:\\work' } } } };
 
-test('image_ocr tool: engine="rapid" degrades gracefully when RapidOCR is missing', async () => {
+test('image_ocr tool: engine="rapid" degrades gracefully when RapidOCR is missing', { skip: NEED_MAC_BIN }, async () => {
   ensureOcrTestImage();
   const bytes = readFileSync(OUT);
   const { ctx } = makeFakeCtx(bytes);
@@ -102,7 +118,7 @@ test('image_ocr tool: engine="rapid" degrades gracefully when RapidOCR is missin
   process.env.DSH_RAPID_PYTHON = 'C:/definitely/not/here/python.exe';
   try {
     const result = await tool.execute({ file_path: 'ui.png', engine: 'rapid' }, EXEC);
-    assert.equal(result.engine, 'windows', 'must degrade to the Windows engine');
+    assert.equal(result.engine, NATIVE_ENGINE, 'must degrade to the platform-native engine');
     assert.match(result.note, /RapidOCR is not installed/);
     assert.match(result.note, /setup-rapid\.mjs/);
     const allText = result.lines.map((l) => l.text).join(' ');

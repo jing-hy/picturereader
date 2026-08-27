@@ -140,7 +140,8 @@ export async function bridgeMessages(messages, ctx, dir) {
  * @param {() => object} 未使用 getConfig —— mode 从 runtime 读，保持实时。
  */
 export function attachImageBridge(ctx) {
-  console.log('[picturereader] attachImageBridge called, ctx keys:', Object.keys(ctx || {}));
+  const debug = getRuntimeConfig()?.debug === true;
+  if (debug) console.log('[picturereader] attachImageBridge called, ctx keys:', Object.keys(ctx || {}));
   
   // 注意：不在 agent/pre-step 读图降级 —— 该阶段图片 attachment 可能尚未落盘，
   // readImage 读不到会报错。真正的图片降级/分析放在 llm/stream（适配器层，此时
@@ -149,12 +150,12 @@ export function attachImageBridge(ctx) {
   // llm/stream 兜底：还带着 image block 的非多模态请求，降级后放行。
   ctx.on('llm/stream', (options, next) => {
     const hasImage = hasImageBlock(options?.messages);
-    console.log('[picturereader] llm/stream fired, model=', options?.model, 'hasImage=', hasImage, 'messagesCount=', options?.messages?.length);
-    
-    if (hasImage) {
-      console.log('[picturereader] Image blocks detected in messages, processing...');
+    if (debug) {
+      console.log('[picturereader] llm/stream fired, model=', options?.model, 'hasImage=', hasImage, 'messagesCount=', options?.messages?.length);
+      if (hasImage) {
+        console.log('[picturereader] Image blocks detected in messages, processing...');
+      }
     }
-    
     return (async function* () {
       let downstream;
       try {
@@ -163,28 +164,26 @@ export function attachImageBridge(ctx) {
         const multimodal = rt?.multimodalModels || [];
         const model = options?.model || '';
         const inWhitelist = multimodal.includes(model);
-        
-        console.log('[picturereader] Bridge config:', { guardOn, inWhitelist, hasImage, mode: rt?.mode });
-        
+
+        if (debug) console.log('[picturereader] Bridge config:', { guardOn, inWhitelist, hasImage, mode: rt?.mode });
+
         if (guardOn && !inWhitelist && hasImage) {
           const exportDir = (rt?.bridge?.exportDir || '').trim() || join(os.tmpdir(), 'picturereader-bridge');
-          console.log('[picturereader] Processing images, exportDir:', exportDir);
+          if (debug) console.log('[picturereader] Processing images, exportDir:', exportDir);
           
           const before = options.messages.reduce((n, m) => n + (Array.isArray(m?.content) ? m.content.filter(b => b?.type === 'image').length : 0), 0);
           const messages = await bridgeMessages(options.messages, ctx, exportDir);
           const after = messages.reduce((n, m) => n + (Array.isArray(m?.content) ? m.content.filter(b => b?.type === 'image').length : 0), 0);
           const changed = messages.some((m, i) => m !== options.messages[i]);
-          
-          console.log(`[picturereader] llm/stream images before=${before} after=${after} changed=${changed} model=${options.model}`);
-          
+          if (debug) console.log(`[picturereader] llm/stream images before=${before} after=${after} changed=${changed} model=${options.model}`);
           if (changed) {
-            console.log('[picturereader] Messages changed, calling next with modified messages');
+            if (debug) console.log('[picturereader] Messages changed, calling next with modified messages');
             downstream = next({ ...options, messages });
           } else {
-            console.log('[picturereader] Messages not changed, using original');
+            if (debug) console.log('[picturereader] Messages not changed, using original');
           }
         } else {
-          console.log('[picturereader] Skipping image processing:', { guardOn, inWhitelist, hasImage });
+          if (debug) console.log('[picturereader] Skipping image processing:', { guardOn, inWhitelist, hasImage });
         }
       } catch (error) {
         console.error('[picturereader] llm/stream downgrade failed:', String(error && error.message || error));
