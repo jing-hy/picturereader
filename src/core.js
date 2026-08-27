@@ -1147,9 +1147,10 @@ export async function ocrImage(buffer, ext, { region, language, engine = 'window
 export function paddlePython() {
   return process.env.DSH_PADDLE_PYTHON ?? 'C:/Users/Administrator/paddle_venv/Scripts/python.exe';
 }
-/** PaddleX model cache (the default ~/.paddlex is broken on this machine); overridable via DSH_PADDLE_CACHE. */
+/** PaddleX model cache; overridable via DSH_PADDLE_CACHE. Default: user home
+ *  (previous default was a hard-coded author machine path). */
 export function paddleCacheHome() {
-  return process.env.DSH_PADDLE_CACHE ?? 'D:/coding/picturereader/.paddlex-cache';
+  return process.env.DSH_PADDLE_CACHE ?? join(homedir(), '.paddlex-cache');
 }
 
 /**
@@ -1191,9 +1192,9 @@ export function runPaddleOcr(pngPath) {
     '        if i < len(polys):',
     '            pts = [[int(float(v)) for v in pt] for pt in polys[i]]',
     '            xs = [pt[0] for pt in pts]; ys = [pt[1] for pt in pts]',
-    '            box = {"x": min(xs), "y": min(ys), "w": max(xs)-min(xs), "h": max(ys)-min(ys)}',
+    '            box = {"x": min(xs), "y": min(ys), "width": max(xs)-min(xs), "height": max(ys)-min(ys)}',
     '        else:',
-    '            box = {"x": 0, "y": 0, "w": 0, "h": 0}',
+    '            box = {"x": 0, "y": 0, "width": 0, "height": 0}',
     "        score = round(float(scores[i]), 3) if i < len(scores) else 0.0",
     "        lines.append({'text': t, 'score': score, **box})",
     "out = json.dumps({'lines': lines}, ensure_ascii=False)",
@@ -1223,8 +1224,16 @@ export function runPaddleOcr(pngPath) {
         reject(new Error(`image_ocr: PaddleOCR failed (exit ${code}): ${tail}`));
         return;
       }
+      // 首次下载模型时 AI Studio 源可能把 `<Response [404]>` 之类的调试行
+      // 打到 stdout（aistudio_sdk 缺陷），污染 base64。防御：只取合法
+      // base64 行再拼接解码（issue #2 Bug 1）。
+      const b64 = stdout.split('\n').map((l) => l.trim()).filter((l) => l && /^[A-Za-z0-9+/=]+$/.test(l)).join('');
+      if (!b64) {
+        reject(new Error('image_ocr: PaddleOCR produced no base64 output (tail: ' + stdout.trim().split('\n').slice(-3).join(' | ').slice(0, 200) + ')'));
+        return;
+      }
       try {
-        const json = Buffer.from(stdout.trim(), 'base64').toString('utf8');
+        const json = Buffer.from(b64, 'base64').toString('utf8');
         const parsed = JSON.parse(json);
         resolve({ lines: parsed.lines ?? [] });
       } catch (error) {
