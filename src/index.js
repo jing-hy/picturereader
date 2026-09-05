@@ -269,12 +269,14 @@ const Config = z.object({
 export const inject = ['tools', 'fs', 'llm', 'attachments'];
 
 export function apply(ctx, config) {
-  // ── 把命名空间加进 dsh-host-apiproxy 白名单 ──
-  try {
-    ensureSettingsNamespaceExposed(ctx, NS, ctx.logger);
-  } catch (error) {
-    ctx.logger?.warn?.(`[picturereader] settings-expose failed: ${String(error)}`);
-  }
+  // 内核 0.1.2 起 settings-controller 的 describe() 原生枚举全部注册命名空间
+  // （rc.2 时代 dsh-host-apiproxy 的 WEB_SETTINGS_NAMESPACES 白名单连同整个
+  // apiproxy 包已被移除），本补丁退役；调用注释保留作老内核回退参考。
+  // try {
+  //   ensureSettingsNamespaceExposed(ctx, NS, ctx.logger);
+  // } catch (error) {
+  //   ctx.logger?.warn?.(`[picturereader] settings-expose failed: ${String(error)}`);
+  // }
 
   // ── 运行时快照：工具执行时惰性读最新 mode / VLM 配置 ──
   let sourceGetter = null;

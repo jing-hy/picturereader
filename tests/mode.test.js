@@ -6,14 +6,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 
 import {
   MODES, normalizeMode, vlmAllowed, isPrivacy, visionAnalyzeDefaults, routePolicyText, routeModeTag,
 } from '../src/routing.js';
 import { modeOf, vlmConfigOf, ocrEngineOf, resolveVlmApiKey, MODE_KEYS, OCR_ENGINE_KEYS } from '../src/config.js';
 import { setRuntimeConfig, setRuntimeSource, getRuntimeConfig, currentMode, vlmAllowedByRuntime } from '../src/runtime.js';
-import { hasImageBlock, deepFreeze, bridgeMessages } from '../src/bridge.js';
+import { hasImageBlock, hasShaAttachmentReference, deepFreeze, bridgeMessages } from '../src/bridge.js';
 
 test('normalizeMode 容错', () => {
   assert.equal(normalizeMode('privacy'), 'privacy');
@@ -174,4 +174,47 @@ test('vlm_enabled 选配：未勾选 → 外部 VLM 不可用', async () => {
   setRuntimeConfig({ mode: 'smart', vlm_base: 'http://ext/v1', vlm_key: 'k' });
   assert.equal(isVlmConfigured(), true, '手写 vlm_base 未给 enabled → 视为启用');
   setRuntimeConfig({ mode: 'smart', vlm: { baseUrl: '', model: '', apiKey: '' } });
+});
+
+test('bridgeMessages：SHA 降级提示从附件对象库导出 PNG 并注入工具引导', async () => {
+  setRuntimeConfig({ mode: 'smart' });
+  const root = await mkdtemp(join(tmpdir(), 'pr-objects-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pr-bridge-'));
+  const hash = 'df7f126dcfac220d8eaeb99173f98f9383445eca3f2e9c6dd4dffb86e9273a86';
+  const objectDir = join(root, hash.slice(0, 2));
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const messages = [{
+    role: 'user',
+    content: [{ type: 'text', text: '[image omitted because this model accepts text only; attachment sha256:df7f126d]' }],
+  }];
+  try {
+    await mkdir(objectDir, { recursive: true });
+    await writeFile(join(objectDir, hash), png);
+    assert.equal(hasShaAttachmentReference(messages), true);
+    const [out] = await bridgeMessages(messages, {}, dir, { attachmentObjectsDir: root });
+    assert.notEqual(out, messages[0], 'SHA 附件消息应替换为新对象');
+    const text = out.content[0].text;
+    assert.match(text, /image_scan/);
+    assert.match(text, /attachment_df7f126dcfac\.png/);
+    const exported = join(dir, 'attachment_df7f126dcfac.png');
+    assert.deepEqual(await readFile(exported), png, '应写出原始图片字节');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+    setRuntimeConfig({ mode: 'smart' });
+  }
+});
+
+test('bridgeMessages：无效或有歧义的 SHA 提示保持原始文本', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pr-objects-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pr-bridge-'));
+  const text = '[image omitted because this model accepts text only; attachment sha256:df7f126d]';
+  const messages = [{ role: 'user', content: [{ type: 'text', text }] }];
+  try {
+    const [out] = await bridgeMessages(messages, {}, dir, { attachmentObjectsDir: root });
+    assert.equal(out, messages[0]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
 });
