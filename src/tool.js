@@ -82,7 +82,8 @@ export function createImageScanTool(ctx) {
       'palette sets the color depth: auto (default, picks by content), full (14 colors), basic (8 colors) or gray (black/gray/white only).',
       'Note: "colors by area" reports TRUE pixel-level color shares (small colored details are never diluted away), and the "hue families" line breaks colors down by hue regardless of darkness — use it to spot pink/cyan/green content that a dark palette would otherwise hide (e.g. blossoms, water, vegetation).',
       'Limitation: no OCR/text recognition and no fine detail — thin lines and small glyphs may disappear at coarse sizes; zoom into a region to inspect details.',
-      'size = target cells on the longer side (8..64, default 32). mode auto picks the color grid when the image is colorful.'
+      'size = target cells on the longer side (8..64, default 32). mode auto picks the color grid when the image is colorful.',
+      'If YOUR OWN model natively accepts image input (you can see the image directly), do NOT use this tool as a substitute for vision — look at the image and answer from what you see. This tool is the "pseudo-multimodal" fallback for models without a vision encoder, and it loses detail. image_ocr remains fully appropriate in that case (see its description).'
     ].join(' '),
     parameters: {
       type: 'object',
@@ -259,6 +260,7 @@ export function createImageOcrTool(ctx) {
       'Recognize text in a local image. Four engines: engine="windows" uses the Windows built-in OCR (no install, good for printed/UI text); engine="macos" uses the macOS built-in Apple Vision OCR (no third-party install; one-time compile via scripts/setup-macos.mjs, fast, Chinese-friendly); engine="paddle" uses PaddleOCR via the local paddle_venv (much better for glowing, curved, stylized or game-rendered text and complex backgrounds, Chinese-friendly; ~2s model load per call); engine="rapid" uses RapidOCR via the local rapid_venv (bundled ONNX models, no network download, fast). Default follows the plugin setting ocr_engine ("windows" when unset).',
       'Use it together with image_scan: when the pixel grid shows a dense, regular, high-contrast structure that looks like text (e.g. titles, labels, buttons, dialogs, glowing banners), call image_ocr on that region and read the actual characters. If the default engine returns nothing but text is expected, retry with another engine.',
       'Parameters: file_path (required), region: [x0, y0, x1, y1] (0..1 fractions) or focus: [row0, col0, row1, col1] (grid coordinates) to restrict recognition to an area, language (optional BCP-47 tag like "zh-Hans" or "en-US", windows/macos engines), engine (default from settings: "windows", "macos", "paddle", "rapid").',
+      'Works for every model: even when YOUR OWN model accepts image input, this tool stays the reliable way to read exact text — multimodal models hallucinate small, low-resolution, glowing or stylized characters, so read such text with image_ocr instead of guessing.',
       'The result lists each recognized line with its pixel bounding box and confidence score.'
     ].join(' '),
     parameters: {
@@ -454,7 +456,8 @@ export function createImageSampleTool(ctx) {
       'Sample a small region of a local image as an NxN grid of EXACT pixels (one real pixel per cell, not an average) plus a local-contrast statistic.',
       'Use it to judge MATERIAL or TEXTURE where a coarse grid is not enough: smooth color gradients (skin, sky, water), high-contrast stripes (metal, wood grain, brushed surfaces), periodic repeats (fabric, brick), high-frequency noise (foliage, gravel), sharp edges (screen content, UI).',
       'Workflow: first use image_scan to locate the area, then call image_sample with a SMALL region (e.g. [x0, y0, x1, y1] fractions covering roughly 30-400 px per side) and an optional size (2..16, default 8). The region must be at least `size` pixels in each direction.',
-      'Interpret the returned RGB grid: row 0 is the top, left to right. High contrast with stripes suggests metal/wood/rough material; smooth low-contrast transitions suggest skin/sky/uniform surfaces; repetitive patterns suggest fabric/texture.'
+      'Interpret the returned RGB grid: row 0 is the top, left to right. High contrast with stripes suggests metal/wood/rough material; smooth low-contrast transitions suggest skin/sky/uniform surfaces; repetitive patterns suggest fabric/texture.',
+      'If YOUR OWN model natively accepts image input, you do not need this tool to judge material or texture — you can see it directly. It is a fallback for models without vision.'
     ].join(' '),
     parameters: {
       type: 'object',

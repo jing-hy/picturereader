@@ -22,6 +22,15 @@ import { join, basename } from 'node:path';
 import os, { homedir } from 'node:os';
 import { getRuntimeConfig } from './runtime.js';
 import { routePolicyText, routeModeTag } from './routing.js';
+import {
+  VERDICTS,
+  activeModel,
+  capabilityOf,
+  isDeclaredNative,
+  noteActiveModel,
+  seedCapabilityFromAdapter,
+} from './vision-capability.js';
+import { realAdapterOf } from './picturereader-vision.mjs';
 
 const EXT_BY_MEDIA = {
   'image/png': '.png',
@@ -213,6 +222,17 @@ export function attachImageBridge(ctx) {
   ctx.on('llm/stream', (options, next) => {
     const hasImage = hasImageBlock(options?.messages);
     const hasShaAttachment = hasShaAttachmentReference(options?.messages);
+    // 记录"当前模型"（系统提示词 section 的同步取值来源之一）；能力缓存尚未
+    // 命中时用**未包装的原始 adapter** 异步补种，下一轮生效。
+    const activeProvider = options?.provider || '';
+    const activeModelId = options?.model || '';
+    if (activeModelId) {
+      noteActiveModel(activeProvider, activeModelId);
+      if (capabilityOf(activeProvider, activeModelId) === undefined) {
+        const llm = ctx.get?.('llm') ?? ctx.llm;
+        void seedCapabilityFromAdapter(realAdapterOf(llm, activeProvider), activeProvider, activeModelId);
+      }
+    }
     if (debug) {
       console.log('[picturereader] llm/stream fired, model=', options?.model, 'hasImage=', hasImage, 'hasShaAttachment=', hasShaAttachment, 'messagesCount=', options?.messages?.length);
       if (hasImage || hasShaAttachment) {
@@ -226,11 +246,23 @@ export function attachImageBridge(ctx) {
         const guardOn = rt?.requestGuard !== false;
         const multimodal = rt?.multimodalModels || [];
         const model = options?.model || '';
-        const inWhitelist = multimodal.includes(model);
+        const provider = options?.provider || '';
+        const autoNative = rt?.nativeVisionAuto !== false;
+        // 底层元数据判定为原生识图（含用户白名单声明）→ 图片直通该模型，不再
+        // 降级成"请用 image_scan"的文本，否则与提示词自相矛盾。
+        // 关掉 native_vision_auto 即回退到"只看 multimodal_models 白名单"的旧行为。
+        const passThrough = autoNative
+          ? isDeclaredNative(provider, model, multimodal)
+          : multimodal.includes(model);
+        // 只有真正的 image block 才直通：若内核已把图片降级成 "attachment
+        // sha256..." 文本引用（说明内核按 text-only 处理该请求），即便我们判定
+        // 原生识图也仍走降级路径，把附件恢复成可读文件路径——否则模型既拿不到
+        // 图、也拿不到路径。
+        const passThroughImages = passThrough && hasImage;
 
-        if (debug) console.log('[picturereader] Bridge config:', { guardOn, inWhitelist, hasImage, hasShaAttachment, mode: rt?.mode });
+        if (debug) console.log('[picturereader] Bridge config:', { guardOn, passThrough, passThroughImages, autoNative, hasImage, hasShaAttachment, mode: rt?.mode });
 
-        if (guardOn && !inWhitelist && (hasImage || hasShaAttachment)) {
+        if (guardOn && !passThroughImages && (hasImage || hasShaAttachment)) {
           const exportDir = (rt?.bridge?.exportDir || '').trim() || join(os.tmpdir(), 'picturereader-bridge');
           if (debug) console.log('[picturereader] Processing images, exportDir:', exportDir);
           const before = options.messages.reduce((n, m) => n + (Array.isArray(m?.content) ? m.content.filter(b => b?.type === 'image').length : 0), 0);
@@ -245,7 +277,7 @@ export function attachImageBridge(ctx) {
             if (debug) console.log('[picturereader] Messages not changed, using original');
           }
         } else {
-          if (debug) console.log('[picturereader] Skipping image processing:', { guardOn, inWhitelist, hasImage, hasShaAttachment });
+          if (debug) console.log('[picturereader] Skipping image processing:', { guardOn, passThrough, passThroughImages, hasImage, hasShaAttachment });
         }
       } catch (error) {
         console.log('[picturereader] llm/stream downgrade failed:', String(error && error.message || error));
@@ -262,16 +294,31 @@ export function attachImageBridge(ctx) {
         // 检查结果中是否包含 image block
         const hasImage = result.content?.some(b => b.type === 'image');
         if (hasImage) {
-          const filePath = exec.arguments?.file_path || 'the image file';
-          // 替换为文本引导，移除 image block
-          result = {
-            ...result,
-            content: [{
-              type: 'text',
-              text: `[图片已读取: ${filePath}]\n\n当前模型不支持图像输入，无法直接处理图片。请使用 picturereader 的工具来分析此图片：\n- image_scan(file_path="${filePath}") — 像素级扫描，看布局/颜色/结构\n- image_ocr(file_path="${filePath}") — 文字识别\n- vision_analyze(file_path="${filePath}") — 统一图像理解\n\n这些工具适用于所有模型，不需要模型支持图像输入。`
-            }]
-          };
-          console.log('[picturereader] intercepted read_image image block, replaced with text guidance');
+          const rt = getRuntimeConfig();
+          const active = activeModel();
+          const whitelist = rt?.multimodalModels || [];
+          const declaredNative = rt?.nativeVisionAuto !== false
+            && active?.model !== undefined
+            && isDeclaredNative(active.provider, active.model, whitelist);
+          const verdict = active?.model === undefined
+            ? undefined
+            : capabilityOf(active.provider, active.model);
+          // 只在**明确判定为纯文本**时才替换：原生识图、白名单声明、以及元数据
+          // 未知（undefined）一律放行——宁可让模型直收图片，也不要把"其实能看图"
+          // 的模型拦成一段文本说明。
+          // 注：此前版本只改了局部 result 却没返回 PostToolDecision（形如
+          // `{ kind:'accept', content }`），所以替换实际从未生效；这里一并修正。
+          if (!declaredNative && verdict === VERDICTS.textOnly) {
+            const filePath = exec.arguments?.file_path || 'the image file';
+            return {
+              kind: 'accept',
+              content: [{
+                type: 'text',
+                text: `[图片已读取: ${filePath}]\n\n当前模型不支持图像输入，无法直接处理图片。请使用 picturereader 的工具来分析此图片：\n- image_scan(file_path="${filePath}") — 像素级扫描，看布局/颜色/结构\n- image_ocr(file_path="${filePath}") — 文字识别\n- vision_analyze(file_path="${filePath}") — 统一图像理解\n\n这些工具适用于所有模型，不需要模型支持图像输入。`
+              }]
+            };
+          }
+          if (rt?.debug === true) console.log('[picturereader] read_image image block passed through:', { model: active?.model, verdict });
         }
       }
     } catch (error) {

@@ -33,7 +33,16 @@ import { NS } from './config.js';
 import z from '@deepseek-ai/schemastery';
 import { setRuntimeSource, getRuntimeConfig } from './runtime.js';
 import { attachImageBridge } from './bridge.js';
-import { registerTwinAdapters, refreshTwinAdapters } from './picturereader-vision.mjs';
+import { registerTwinAdapters, refreshTwinAdapters, realAdapterOf } from './picturereader-vision.mjs';
+import {
+  CAPABILITY_SECTION_NAME,
+  CAPABILITY_SECTION_ORDER,
+  capabilitySectionText,
+  noteActiveModel,
+  noteAgentModel,
+  setCapability,
+  verdictFromModalities,
+} from './vision-capability.js';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -261,6 +270,10 @@ const Config = z.object({
     .boolean()
     .default(false)
     .description('高级：调试日志'),
+  native_vision_auto: z
+    .boolean()
+    .default(true)
+    .description('高级：按底层模型元数据（inputModalities）自动判定原生识图——命中时提示词不建议用 image_scan，并让图片直通该模型'),
 });
 
 /** Services required at runtime. */
@@ -329,6 +342,46 @@ export function apply(ctx, config) {
     ctx.logger?.warn?.(`[picturereader] image bridge disabled: ${String(error)}`);
   }
 
+  // ── 当前模型跟踪：内核每轮把选中的 provider/model 写进 assembly.variables
+  // （installModelSelection），这是"本轮实际使用哪个模型"的最权威来源。能力
+  // 提示词 section 的 text 是同步函数，靠这里维护的 agent 级缓存取值。 ──
+  ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+    const out = await next();
+    try {
+      const vars = out?.variables ?? {};
+      const agent = context?.agent;
+      const provider = (typeof vars.provider === 'string' && vars.provider) || agent?.options?.provider || '';
+      const model = (typeof vars.model === 'string' && vars.model) || agent?.options?.model || '';
+      if (provider || model) {
+        noteActiveModel(provider, model);
+        if (agent) noteAgentModel(agent, provider, model);
+      }
+    } catch { /* 跟踪失败绝不影响提示词组装 */ }
+    return out;
+  }, { global: true });
+
+  // ── 系统提示词：模型原生识图时注入"不要用 image_scan，但 image_ocr 照用" ──
+  // 软注入（不写进模块级 inject）：老内核没有 systemPrompt 服务时，插件其余
+  // 功能必须照常工作。
+  try {
+    ctx.inject(['systemPrompt'], (sctx) => {
+      const registry = sctx.systemPrompt;
+      if (!registry || typeof registry.section !== 'function') return;
+      ctx.effect(
+        () => registry.section({
+          name: CAPABILITY_SECTION_NAME,
+          order: CAPABILITY_SECTION_ORDER,
+          // 空串会被 renderPrompt 丢弃：text-only / unknown 一律不注入。
+          text: (context) => capabilitySectionText(context?.agent, context?.agent?.options, getConfig()),
+        }),
+        'picturereader: image-capability section',
+      );
+      console.log('[picturereader] registered image-capability system-prompt section');
+    });
+  } catch (error) {
+    ctx.logger?.warn?.(`[picturereader] capability section disabled: ${String(error)}`);
+  }
+
   // ── 设置命名空间 + 模型扫描 + 视觉孪生路由（需要 settings 和 llm 服务）──
   ctx.inject(['settings', 'llm'], (sctx) => {
     const llm = sctx.llm;
@@ -348,12 +401,29 @@ export function apply(ctx, config) {
         const providers = llm.listProviders();
         const textModels = [];
         for (const p of providers) {
+          // ⚠️ 能力判定必须用**未包装的原始 adapter**（realAdapterOf）：孪生会把
+          // 被勾选模型的 inputModalities 改写成 ['text','image']，直接走
+          // llm.listModels() 会把"伪识图（孪生）"误判成"真·原生识图"。
+          // 拿不到原始 adapter 时宁可不写能力缓存（保持 unknown），也不用可能
+          // 被污染的数据。
+          const adapter = realAdapterOf(llm, p.id);
           try {
-            const models = await llm.listModels(p.id);
-            for (const m of models) {
-              const mods = m.inputModalities || [];
-              if (!mods.includes('image')) {
-                textModels.push({ provider: p.id, id: m.id, name: m.name || m.id });
+            if (adapter && typeof adapter.listModels === 'function') {
+              const models = await adapter.listModels(p.id);
+              for (const m of models) {
+                setCapability(p.id, m.id, verdictFromModalities(m.inputModalities), 'startup-scan');
+                const mods = m.inputModalities || [];
+                if (!mods.includes('image')) {
+                  textModels.push({ provider: p.id, id: m.id, name: m.name || m.id });
+                }
+              }
+            } else {
+              const models = await llm.listModels(p.id);
+              for (const m of models) {
+                const mods = m.inputModalities || [];
+                if (!mods.includes('image')) {
+                  textModels.push({ provider: p.id, id: m.id, name: m.name || m.id });
+                }
               }
             }
           } catch { /* 跳过 */ }

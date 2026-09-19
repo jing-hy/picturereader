@@ -194,6 +194,31 @@ export function refreshTwinAdapters(ctx, llm, getConfig) {
   return twinState.wrapped.size;
 }
 
+/**
+ * 返回某 provider 的**未包装原始 adapter**（用于模型能力判定）。
+ *
+ * 孪生会通过 Proxy 把被勾选模型的 inputModalities 改写成 ['text','image']，
+ * 因此 `llm.listModels()` / `llm.resolveModel()` 的结果不能用来判断"模型是否
+ * 真的原生识图"——那会把"伪识图（孪生）"误判成原生识图。本函数绕过孪生：
+ *  - 已记录原始 adapter（twinState.wrapped）→ 直接返回它；
+ *  - 当前 adapter 是**别人的** proxy（带 __picturereaderTwin 但本模块没记录）
+ *    → 返回 null，调用方按"未知"处理，绝不猜。
+ * @param {object} llm - 宿主 llm 服务（registration）。
+ * @param {string} provider - provider 路由键。
+ * @returns {object|null} 原始 adapter 或 null。
+ */
+export function realAdapterOf(llm, provider) {
+  if (!llm || !provider) return null;
+  const unwrapped = twinState?.wrapped?.get(provider);
+  if (unwrapped) return unwrapped;
+  let reg;
+  try { reg = llm.registration(provider); } catch { return null; }
+  const adapter = reg?.adapter;
+  if (!adapter) return null;
+  if (adapter.__picturereaderTwin) return null;
+  return adapter;
+}
+
 /** 若 provider 当前 adapter 尚未被包装（非孪生 proxy），则包装之。 */
 function wrapProvider(state, ctx, llm, provider, getConfig) {
   let reg;

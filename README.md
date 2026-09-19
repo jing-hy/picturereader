@@ -1,7 +1,9 @@
 # picturereader
 
-> **v3.3.3** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档 / 修图」能力。
+> **v3.4.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档 / 修图」能力。
 > 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×4 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）、**本地修图工具 `image_edit`**（Pillow/OpenCV 纯 CPU：缩放 / 旋转 / 滤镜 / 合成 / 水印 / 去背景 / 超分等）与**可选外部 VLM 桥**。一个插件全包。
+>
+> **v3.4.0 新增**：**原生识图能力感知**。插件现在从**模型能力元数据**（`inputModalities`，与 DSH 内核的图片门控同源）判断当前会话的模型是否**自己就能看图**：命中时在系统提示词里明确说明「**不要**用 `image_scan` / `image_sample` 这类"伪多模态"替代路径，**但 `image_ocr` 仍应正常使用**」，并让粘贴/读取的图片**直通**该模型、不再降级成文本引导；纯文本模型与元数据缺失（未知）时行为与 v3.3.3 完全一致。判定走**未包装的原始 adapter**，因此不会被本插件自己的视觉孪生误判成原生识图。
 >
 > **v3.3.0 新增**：**macOS 原生 Vision OCR 引擎**（`engine="macos"`，`scripts/setup-macos.mjs` 一键编译，PR #4 合入）；OCR 引擎选项按平台条件显示（macos 仅 macOS、windows 仅 Windows，paddle/rapid 跨平台始终显示）；修复 PaddleOCR 新环境首次调用三个缺陷（stdout 污染 / w/h→width/height / 缓存路径写死，issue #2）；设置卡 UI 重做（settings-panel 设计语言）；调试日志门控（llm/stream 桥不再刷屏）；peerDependencies 兼容 DSH 0.1.1-rc.2（issue #3）。
 
@@ -123,6 +125,17 @@ Web 设置页注册「图片阅读」卡片（settings-panel 设计语言：卡�
 ### ⑦ 粘贴即用 + 缩略图
 
 开启视觉孪生并选择「(视觉)」模型变体后：粘贴/拖入图片 → 原生缩略图 → 图片块进会话 → 被孪生 `stream` 拦截 → 导出文本路径 + 本地证据 → 纯文本模型拿到结果，可继续用 `image_scan` / `image_ocr` 深挖。
+
+### ⑨ 原生识图能力感知（v3.4.0）
+
+**给"自己就能看图"的模型让路**：picturereader 的本地工具链是为**没有视觉编码器**的模型准备的替代路径，而原生多模态模型用它们只会更慢更不准。插件因此从底层元数据判断能力，并据此调整提示词与图片链路。
+
+- **判定与内核同源**：读 `llm` 适配器的 `inputModalities`（`'text' | 'image'`），三态语义与内核一致 —— 显式含 `image` = **原生识图**；显式不含 = **纯文本**（negative capability）；字段缺失 = **未知**（不注入、不改变行为，零回归）。
+- **提示词注入**：以 `ctx.systemPrompt.section()` 注册动态 section（name `picturereader:image-capability`，order `3000`）。原生识图时注入：**不建议**用 `image_scan` / `image_sample` 这些把图片降采样成像素网格的替代手段（信息损失大、易把结论建立在残缺数据上），**`image_ocr` 仍应正常使用**（原生视觉对小字／发光字／艺术字会幻觉，文字以 OCR 实读为准），`image-reading` skill 的 5 步扫描流程也不必遵循。
+- **图片直通**：判定为原生识图（或命中 `multimodal_models` 白名单）时，`llm/stream` 图片桥**不再降级**图片块，粘贴的图直达模型；`read_image` 返回的图片块同样不再被替换成文本说明。
+- **不被孪生污染**：能力判定用 `realAdapterOf()` 取**未包装的原始 adapter** —— 本插件的视觉孪生会把被勾选模型的 `inputModalities` 改写成 `['text','image']`，若直接读 `llm.listModels()`，会把「伪识图（孪生）」误判成「真·原生识图」。
+- **当前模型跟踪**：`system-prompt/assemble`（内核每轮写入的 `variables.provider/model`）→ agent 级缓存（`WeakMap`，多会话/子代理互不干扰）→ `llm/stream` 兜底；模型切换后最迟下一轮生效。
+- **可回退**：高级开关 `native_vision_auto`（默认 `true`）。关闭后提示词注入与图片直通全部回到 v3.3.3 的行为（只认 `multimodal_models` 白名单）。
 
 ### ⑧ 本地修图工具 `image_edit`
 
@@ -299,6 +312,7 @@ await main()
 | `ocr_language` | 空 | OCR 默认语言（BCP-47，如 zh-Hans / en-US） |
 | `multimodal_models` | 空 | 多模态白名单（逗号分隔，这些模型直收图片不降级） |
 | `request_guard` | `true` | 请求保护（llm/stream 最后防线降级 image block） |
+| `native_vision_auto` | `true` | 按底层模型元数据（`inputModalities`）自动判定原生识图：命中时提示词不建议 `image_scan`／图片直通该模型；关闭即回退旧行为 |
 | `batch_probe_first` | `3` | image_batch 探测前几张（判断是否文字密集） |
 | `batch_ocr_limit_chars` | `800` | image_batch 每张 OCR 截断字符数 |
 | `doc_dpi` | `150` | document_to_image 渲染 DPI |
@@ -373,6 +387,12 @@ await main()
 
 ## 测试情况
 
+### v3.4.0
+
+- `node --test` 全量 **162 通过 / 0 失败**，其中新增：
+  - `tests/vision-capability.test.js`（11 例）：三态判定与内核 `inputModalities` 语义一致（含 `[]` = 显式省略、`undefined` = 未知）、能力缓存读写、`seedCapabilityFromAdapter` 三条路径（`resolveModel` / `listModels` / 抛错退化为未知）、agent 级当前模型跟踪的优先级、白名单覆盖、提示词文案（native 注入且明确"不用 scan、ocr 照用"；text-only 与 unknown 不注入）、section 名/order 常量稳定。
+  - `tests/prompt-injection.test.js`（3 例集成冒烟）：用最小 `ctx` 桩真跑一遍 `apply()`，验证 ① 原始 adapter 扫描 → 能力缓存；② `system-prompt/assemble` → section 注册并注入原生识图说明；③ native 模型图片**原样放行**、纯文本模型仍降级为 `image_scan` 引导、`native_vision_auto=false` 完全回退。
+
 ### v3.3.0
 
 - `node --test` 全量 **146 通过 / 0 失败**：
@@ -409,7 +429,18 @@ await main()
 
 ## 版本更新日志
 
-### v3.3.3（本次）
+### v3.4.0（本次）
+
+- **原生识图能力感知（新功能）**：新增 `src/vision-capability.js`，从模型能力元数据 `inputModalities`（与内核图片门控同源）做三态判定 `native / text-only / unknown`。
+  - **提示词**：经 `ctx.systemPrompt.section()` 注入动态段落（name `picturereader:image-capability`，order `3000`，空串自动丢弃）。原生识图时明确：**不要**用 `image_scan` / `image_sample` 这类伪多模态替代路径，**但 `image_ocr` 仍应正常使用**（原生视觉对小字/发光字会幻觉，文字以 OCR 实读为准）。`image_scan` / `image_sample` / `image_ocr` 的工具描述也各补了一句能力前提。
+  - **图片链路**：判定为原生识图（或命中 `multimodal_models` 白名单）时 `llm/stream` 桥**不再降级**图片块，粘贴图片直达模型。
+  - **不被孪生污染（关键）**：能力判定走新增的 `realAdapterOf()` 取**未包装的原始 adapter** —— 孪生会把被勾选模型的 `inputModalities` 改写成 `['text','image']`，直接读 `llm.listModels()` 会把「伪识图」误判成「真识图」；拿不到原始 adapter 时宁可记 `unknown`，也不用可能被污染的数据。
+  - **当前模型跟踪**：`system-prompt/assemble` 读内核每轮写入的 `variables.provider/model` → agent 级 `WeakMap` 缓存（多会话/子代理隔离）→ `llm/stream` 兜底 + 冷启动异步补种；模型切换后最迟下一轮生效。
+  - **设置项**：新增高级开关 `native_vision_auto`（默认 `true`，设置卡同步显示）。**未知（无元数据）不注入、不改变任何行为**，保证零回归。
+- **修复 `read_image` 拦截从未生效**：`tools/post-execute` 的处理器原先只改了局部 `result` 却没返回 `PostToolDecision`（应为 `{ kind:'accept', content }`），替换实际从未发生。现已修正，并且比原逻辑更保守：**只在明确判定为纯文本**时才替换成 `image_scan` / `image_ocr` 引导，原生识图与未知一律放行。
+- 测试：`npm test` 全量 **162 通过 / 0 失败**（新增 11 例单测 + 3 例 `apply()` 集成冒烟）。
+
+### v3.3.3
 
 - **适配 dsh 0.1.2 / 0.1.3 的破坏性变更（关键修复，含 @FreyHsia 贡献）**：
   - **settings 命名空间 API**：内核移除 `settingsNamespace()` 导出（校验收进 `register()` 内部，见内核 `parseSettingsNamespace`），原先顶层 `import { settingsNamespace } from '@deepseek-ai/dsh-settings'` 在 ESM 链接期即失败 —— 模块整体加载失败会拖垮整棵插件树，在 EAC 上表现为「一对话就报错」并触发 guard 安全模式（配套插件行被大范围剥离）。现改为把裸 `NS` 直接交给 `sctx.settings.register(NS, Config, { base: config })`，返回的 scope 仍具备 `get / watch / update / replace`，行为不变。

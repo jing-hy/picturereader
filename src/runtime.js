@@ -60,6 +60,7 @@ function build(raw) {
     },
     maxImageBytes: v.max_image_bytes !== undefined ? Number(v.max_image_bytes) : 52428800,
     multimodalModels: String(v.multimodal_models ?? '').split(',').map(s => s.trim()).filter(Boolean),
+    nativeVisionAuto: v.native_vision_auto !== undefined ? Boolean(v.native_vision_auto) : true,
     requestGuard: v.request_guard !== undefined ? Boolean(v.request_guard) : true,
     debug: v.debug === true,
   };
