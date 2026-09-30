@@ -429,7 +429,20 @@ await main()
 
 ## 版本更新日志
 
-### v3.4.1（本次）
+### v3.5.0（本次）
+
+- **0.2.x 设置卡片回归（新功能）**：0.2.x 移除了 `settingsScope`（命名空间式设置模型整体退役），v3.4.1 只能在老内核上显示自绘卡片。本版按官方契约把卡片注册为 **「设置 → 内置插件」页里的一个 tab**（`slots.register` 到 `settings.plugins.tab`，与官方 `dsh-client-ui-settings-plugin-inventory` 同一写法），并把数据通道换成插件自有的 loopback 路由：
+  - `GET /picturereader/config` 读当前生效配置（entry config + 用户级覆盖层，Schema 默认值由 `Config()` 补齐）；
+  - `PUT /picturereader/config` 增量写 `{set, unset}` 到 `$DSH_HOME/picturereader-config.json`（原子写；`vision_models` 这类对象数组用 JSON 天然承载）；
+  - 沿用 loopback 信任围栏（非本机 Host / 跨站请求一律 403）。
+  - 内核代次用 `ctx.get("settingsScope")` 运行时探测（**不能**直接读 `ctx.settingsScope`：cordis 对未 inject 的服务属性一读即抛），0.1.x 仍走原 `settings.section` + `settingsScope` 路径，两代界面同源。
+  - 副作用：保存后立即刷新视觉孪生包装（勾选模型无需重启）。
+- **修复 0.2.x 下卡片完全不可用**：`ctx.settingsScope` 探测与 `snapshot.writable` 缺失导致的按钮恒禁用/模块加载失败。
+- **配色与控件 token 保持不变**：`--dsw-alias-*` 系列 token 在 0.2.0-rc.2 全部存在（已核对），无需改样式。
+- **无障碍实测（dsh 0.2.0-rc.2 + Edge/Playwright）**：无障碍树确认 `tab "图片阅读" [selected]` → `tabpanel` 内 heading/combobox/checkbox/button 结构完整（5 张卡片、15 个输入、2 个下拉、保存按钮）；交互链路实测选择「严谨模式」→ 点「保存」→ UI 显示「已保存」→ `picturereader-config.json` 落盘 `mode: "strict"`。
+- 测试：`npm test` 全量 **162 通过 / 0 失败**。
+
+### v3.4.1
 
 - **适配 dsh 0.2.0-rc.2（关键修复）**：0.2.x 的设置模型整体换代 —— `@deepseek-ai/dsh-settings` 不再提供「插件注册命名空间」的 `register(ns, Config, opts)`（实测服务方法只剩 `describe / schema / mutate / update / replace / write / configure` 等），客户端服务 `settingsScope` 也已移除；插件改为**直接读自身 entry 的 Config**，表单由内核按 Config schema 生成。
   - **host**：`sctx.settings.register(...)` 改为两代兼容分支 —— 有 `register` 走 0.1.x 原逻辑；没有则 `sourceGetter` 回退到 `ctx.config` 并监听 `config` 事件刷新孪生；注册异常一律降级并告警，**不再中断后续的模型扫描与 `registerTwinAdapters`**（0.2.x 上 `register` 抛 TypeError 曾让视觉孪生与 `available_text_models` 扫描全部静默失效）。
@@ -439,7 +452,7 @@ await main()
 - **`peerDependencies` 追加 `^0.2.0-rc.2`**（`@deepseek-ai/dsh-settings` / `@deepseek-ai/dsh-llm`）：0.2.x 的插件版本门禁在启动时比对 peer 声明，区间不含 0.2.x 的插件会被「skipping profile bundle」静默跳过、必须人工 `dsh plugin allow-version` 放行；本版起直接加载，无需豁免。
 - **实测（dsh 0.2.0-rc.2，官方桌面版 desktop profile）**：模型扫描产物 `~/.dsh/picturereader-models.json` 由「不生成」（改前）恢复为正常写入（改后）；`image_scan` 多轮 + `image_ocr(engine=rapid)` 端到端任务通过。
 - 测试：`npm test` 全量 **162 通过 / 0 失败**。
-- **已知缺口**：0.2.x 下自绘设置卡片暂不显示（内核移除了命名空间式设置通道）。该内核上请把配置写进 profile patch 的本插件 entry（`$DSH_HOME/profiles/<profile>/cordis.patch.yml` 的 `- id: picturereader` 行 `config:`）；卡片迁移到 0.2.x 方案（内核自动表单 / 插件自绘路由）留待后续版本。
+- **已知缺口（v3.5.0 起已解决）**：0.2.x 下自绘设置卡片曾不显示；v3.5.0 已改为注册到「设置 → 内置插件」页的 tab，并走插件自有的 loopback 配置路由。
 
 ### v3.4.0
 

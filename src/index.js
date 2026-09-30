@@ -34,6 +34,7 @@ import z from '@deepseek-ai/schemastery';
 import { setRuntimeSource, getRuntimeConfig } from './runtime.js';
 import { attachImageBridge } from './bridge.js';
 import { registerTwinAdapters, refreshTwinAdapters, realAdapterOf } from './picturereader-vision.mjs';
+import { mergeOverride, mountConfigRoute, readOverride, writeOverride } from './config-api.js';
 import {
   CAPABILITY_SECTION_NAME,
   CAPABILITY_SECTION_ORDER,
@@ -291,9 +292,34 @@ export function apply(ctx, config) {
   // （rc.2 时代 dsh-host-apiproxy 的 WEB_SETTINGS_NAMESPACES 白名单连同整个
   // apiproxy 包已被移除），本补丁退役；调用已删除（原 ensureSettingsNamespaceExposed）。
   // ── 运行时快照：工具执行时惰性读最新 mode / VLM 配置 ──
+  // 配置来源分两代：0.1.x 由 settings 命名空间 scope 提供；0.2.x 命名空间模型退役，
+  // 改为「entry config（部署级）+ 插件自有覆盖层（用户级）」合并，覆盖层经 loopback
+  // 路由由设置卡读写（见 src/config-api.js）。
   let sourceGetter = null;
-  const getConfig = () => (sourceGetter ? sourceGetter() : config);
+  /** 0.2.x 用户级覆盖层（$DSH_HOME/picturereader-config.json）。 */
+  let overrideConfig = {};
+  // 注意：不能用 `ctx.config` —— cordis 要求先 inject('config')，否则抛
+  // `cannot get property "config" without inject`。entry config 由 apply 的第二参数
+  // 提供（部署级），用户级改动走覆盖层。
+  const baseConfig = () => config ?? {};
+  /** 合并 entry config 与覆盖层，并尽量补齐 schema 默认值（解析失败回退原值）。 */
+  const resolveConfig = () => {
+    const merged = { ...baseConfig(), ...overrideConfig };
+    try {
+      const parsed = typeof Config === 'function' ? Config(merged) : undefined;
+      if (parsed !== null && typeof parsed === 'object') return parsed;
+    } catch { /* schema 解析失败：用原始合并值，绝不因此中断插件 */ }
+    return merged;
+  };
+  const getConfig = () => (sourceGetter ? sourceGetter() : resolveConfig());
+  sourceGetter = resolveConfig;
   setRuntimeSource(getConfig);
+  // 覆盖层异步载入：读取完成前按 entry config 工作。
+  void (async () => {
+    try {
+      overrideConfig = await readOverride();
+    } catch { /* 读不到当空覆盖层 */ }
+  })();
 
   // ── 注册工具（不需要 settings/llm 服务）──
   ctx.effect(() => {
@@ -403,21 +429,34 @@ export function apply(ctx, config) {
     // 都在同一段里，0.1.x 的 register 在 0.2.x 上抛 TypeError 曾让视觉孪生静默失效。
     let scope = null;
     const settings = sctx.settings;
+    /** 0.2.x 通道：用户级覆盖层 + loopback 路由（设置卡读写）。 */
+    const useOverrideChannel = () => {
+      mountConfigRoute(ctx, {
+        read: () => getConfig(),
+        write: async (patch) => {
+          const next = mergeOverride(await readOverride(), patch);
+          await writeOverride(next);
+          overrideConfig = next;
+          // 勾选模型变化立即反映到孪生包装（保存即生效，无需重启）。
+          try {
+            refreshTwinAdapters(ctx, llm, getConfig);
+          } catch { /* 孪生刷新失败不应让保存报错 */ }
+          return getConfig();
+        },
+      }, (message) => ctx.logger?.warn?.(`[picturereader] ${message}`));
+    };
     try {
       if (settings && typeof settings.register === 'function') {
         scope = settings.register(NS, Config, { base: config });
         sourceGetter = () => scope.get();
         scope.watch(() => { refreshTwinAdapters(ctx, llm, getConfig); /* 勾选模型热更新孪生包装 */ });
       } else {
-        sourceGetter = () => (ctx.config ?? config);
-        // 0.2.x：entry 的 volatile 字段更新后重刷孪生包装（无该事件的内核静默跳过）。
-        try {
-          ctx.on?.('config', () => { refreshTwinAdapters(ctx, llm, getConfig); });
-        } catch { /* 该内核不提供 config 事件 */ }
+        // 0.2.x：settings.register 与客户端 settingsScope 均已移除 → 走自建通道。
+        useOverrideChannel();
       }
     } catch (error) {
       ctx.logger?.warn?.(`[picturereader] settings registration unavailable: ${String(error?.message || error)}`);
-      sourceGetter = () => (ctx.config ?? config);
+      useOverrideChannel();
     }
 
     // ── 扫描所有 provider 的文本模型 → 写入 available_text_models ──

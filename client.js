@@ -86,7 +86,9 @@ window.__ModuleLoader__.load({
 
     // ── locale ────────────────────────────────────────────────────────────
     var NS = "picturereader";
-    var inject = ["slots", "locale", "settingsScope"];
+    // settingsScope 只在 0.1.x 存在（0.2.x 已整体移除），故不进 inject 列表 —— 声明它会
+    // 让整个客户端模块在 0.2.x 上等不到依赖而静默不 apply；改为运行时探测后分叉。
+    var inject = ["slots", "locale"];
     var zh = {
       nav: "图片阅读",
       intro: "picturereader：让纯文本模型用本地工具看懂图片。选择使用模式；在下方勾选需要视觉桥的模型；配置外部视觉端点（选配）。修改后即时生效（设置项），视觉桥需重启 DSH。",
@@ -387,6 +389,67 @@ window.__ModuleLoader__.load({
 
     function tOf(props) { return props.t; }
 
+    // ── 0.2.x 配置通道 ────────────────────────────────────────────────────
+    // 0.2.x 移除了 settingsScope（设置模型改为内核按 Config schema 生成表单），
+    // 本卡片保留自绘实现，数据走插件自有的 loopback 路由。这里暴露与
+    // settingsScope 相同的快照接口（getSnapshot / load / subscribe / set / unset），
+    // 因此 Section 组件在两代内核上完全同源。
+    var CONFIG_ROUTE = "/picturereader/config";
+    function createRemoteScope() {
+      // snapshot 形状对齐 0.1.x 的 settingsScope：Section 组件读 status / value / writable。
+      // writable 恒为 true —— 本通道没有只读模式，写失败由保存流程的错误提示承担。
+      var snapshot = { status: "loading", value: void 0, writable: true };
+      var listeners = [];
+      function emit() {
+        var current = snapshot;
+        listeners.slice().forEach(function (fn) { try { fn(current); } catch (_e) { /* 单个订阅者出错不影响他人 */ } });
+      }
+      function publish(status, value) { snapshot = { status: status, value: value, writable: true }; emit(); }
+      function request(method, body) {
+        var init = { method: method };
+        if (body !== void 0) {
+          init.headers = { "content-type": "application/json" };
+          init.body = JSON.stringify(body);
+        }
+        return fetch(CONFIG_ROUTE, init).then(function (response) {
+          return response.json().then(function (payload) {
+            if (!response.ok || !payload || payload.ok !== true) {
+              var message = payload && payload.error && payload.error.message ? payload.error.message : "HTTP " + response.status;
+              throw new Error(message);
+            }
+            return payload.value;
+          });
+        });
+      }
+      return {
+        getSnapshot: function () { return snapshot; },
+        load: function () {
+          return request("GET").then(function (value) {
+            publish("ready", value);
+            return value;
+          }, function (error) {
+            publish("unavailable", void 0);
+            throw error;
+          });
+        },
+        subscribe: function (fn) {
+          listeners.push(fn);
+          return function () {
+            var index = listeners.indexOf(fn);
+            if (index >= 0) listeners.splice(index, 1);
+          };
+        },
+        set: function (key, value) {
+          var body = { set: {} };
+          body.set[key] = value;
+          return request("PUT", body).then(function (next) { publish("ready", next); return next; });
+        },
+        unset: function (key) {
+          return request("PUT", { unset: [key] }).then(function (next) { publish("ready", next); return next; });
+        },
+      };
+    }
+
     // ── Section component ─────────────────────────────────────────────────
     function Section(props) {
       var t = props.t;
@@ -634,25 +697,54 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
+      // 卡片挂载失败不应让整个客户端模块被判 failed（工具侧不受影响），
+      // 但必须留下可诊断的日志。
+      try {
+        applySettingsCard(ctx);
+      } catch (error) {
+        console.error("[picturereader] settings card failed to mount:", error);
+      }
+    }
+
+    function applySettingsCard(ctx) {
       var t = ctx.locale.bind(NS);
       ctx.effect(function () { return ctx.locale.register(NS, { zh: zh, en: en }); }, "picturereader: dictionaries");
-      // dsh 0.2.x 移除了 settingsScope（命名空间式设置模型整体退役，改为内核按
-      // Config schema 生成表单）。这里做运行时探测：拿不到就跳过自绘设置卡片，
-      // 绝不让客户端模块 apply 抛错（抛错会连带工具卡片一起失效）。
-      if (!ctx.settingsScope || typeof ctx.settingsScope.bind !== "function") {
-        console.warn("[picturereader] settingsScope unavailable (dsh 0.2+); settings card skipped");
+      // 不能用 `ctx.settingsScope` 直接探测：cordis 的 ctx 属性访问受 inject 保护，
+      // 未声明的服务一读就抛 `cannot get property "settingsScope" without inject`。
+      // ctx.get(name) 对未注册服务返回 undefined，是唯一安全的探测方式。
+      var settingsScope = typeof ctx.get === "function" ? ctx.get("settingsScope") : void 0;
+      if (settingsScope === void 0) {
+        try { settingsScope = ctx.settingsScope; } catch (_error) { settingsScope = void 0; }
+      }
+      if (settingsScope && typeof settingsScope.bind === "function") {
+        // 0.1.x：内核提供命名空间式 settingsScope → 注册一级设置分区。
+        var scope = settingsScope.bind({ namespace: NS });
+        ctx.slots.inject("settings.section", function () {
+          return ctx.slots.register({
+            name: "settings.section",
+            id: "picturereader",
+            order: 30,
+            label: function () { return t("nav"); },
+            locale: NS,
+          }, function (props) {
+            return h(Section, Object.assign({}, props, { scope: scope }));
+          });
+        });
         return;
       }
-      var scope = ctx.settingsScope.bind({ namespace: NS });
-      ctx.slots.inject("settings.section", function () {
+      // 0.2.x：settingsScope 已移除。按官方契约（dsh-client-ui-settings-plugins 的注释：
+      // 「host 平面插件的配置页住在各自的 companion 包里，注册进 Plugins 页」）把卡片注册为
+      // 「设置 → 内置插件」页里的一个 tab；数据经插件自有的 loopback 路由读写。
+      var remoteScope = createRemoteScope();
+      ctx.slots.inject("settings.plugins.tab", function () {
         return ctx.slots.register({
-          name: "settings.section",
+          name: "settings.plugins.tab",
           id: "picturereader",
           order: 30,
           label: function () { return t("nav"); },
           locale: NS,
         }, function (props) {
-          return h(Section, Object.assign({}, props, { scope: scope }));
+          return h(Section, Object.assign({}, props, { scope: remoteScope }));
         });
       });
     }
