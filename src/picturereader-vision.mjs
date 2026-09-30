@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { contentHasImage } from '@deepseek-ai/dsh-llm';
+import { readAttachmentImage } from './bridge.js';
 import webpWasm from 'webp-wasm';
 // webp-wasm 是 callback API（内部依赖 this=模块对象）。手写 callback→Promise
 // 包装（勿用 util.promisify：其启发式对纯 callback 函数误报 DEP0174 噪音）。
@@ -110,12 +111,13 @@ async function saveImageBytes(bytes, mediaType) {
 /** 读图（经 attachments）并做本地说明，返回一段文本证据（path 供工具续读）。 */
 async function analyzeImage(block, attachments) {
   let data;
+  let mediaType = block?.attachment?.mediaType;
   try {
-    ({ data } = await attachments.readImage(block.attachment));
+    ({ data, mediaType } = await readAttachmentImage(attachments, block.attachment));
   } catch (e) {
     return `[图片]（读取失败：${e?.message || e}），请用 image_scan 分析附件`;
   }
-  const path = await saveImageBytes(data, block.attachment.mediaType);
+  const path = await saveImageBytes(data, mediaType || block?.attachment?.mediaType);
   return `[用户粘贴了一张图片]\n图片已导出到：${path}\n请先用 image_scan 分析该图片（如含文字再用 image_ocr），结合内容回答。`;
 }
 

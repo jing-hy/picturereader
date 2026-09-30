@@ -174,8 +174,15 @@ const MODELS_CACHE = join(homedir(), '.dsh', 'picturereader-models.json');
 
 export const name = 'picturereader';
 
-/** 设置命名空间的运行时 schema（schemastery）。 */
-const Config = z.object({
+/**
+ * 插件配置 schema（schemastery）。
+ *
+ * 导出为 `Config` 是 cordis/DSH 的插件约定：0.2.x 的 settings 服务不再提供
+ * 「插件注册命名空间」模型，而是直接从 profile entry 的 Config schema 派生
+ * 表单（表单只投影 `.volatile()` 字段）；0.1.x 下本导出无副作用，仍由
+ * `settings.register(NS, Config, …)` 消费同一份 schema。
+ */
+export const Config = z.object({
   mode: z
     .string()
     .default('smart')
@@ -382,15 +389,36 @@ export function apply(ctx, config) {
     ctx.logger?.warn?.(`[picturereader] capability section disabled: ${String(error)}`);
   }
 
-  // ── 设置命名空间 + 模型扫描 + 视觉孪生路由（需要 settings 和 llm 服务）──
+  // ── 配置来源 + 模型扫描 + 视觉孪生路由（需要 settings 和 llm 服务）──
   ctx.inject(['settings', 'llm'], (sctx) => {
     const llm = sctx.llm;
-    // 内核 0.1.2+ 起 dsh-settings 不再导出 settingsNamespace 品牌函数
-    // （命名空间校验收进 register() 内部，见内核 parseSettingsNamespace）。
-    // 直接把裸 NS 交给 register 即可，返回的 scope 仍具备 get/watch/update/replace。
-    const scope = sctx.settings.register(NS, Config, { base: config });
-    sourceGetter = () => scope.get();
-    scope.watch(() => { refreshTwinAdapters(ctx, llm, getConfig); /* 勾选模型热更新孪生包装 */ });
+    // 配置读取分两代：
+    //  - 0.1.x：settings.register(NS, Config, { base }) 返回 scope，具备
+    //    get/watch/update/replace（0.1.2 起不再需要 settingsNamespace 品牌函数，
+    //    命名空间校验收进 register 内部）。
+    //  - 0.2.x：命名空间注册模型整体退役（settings 服务只剩 describe/schema/
+    //    mutate/update/…，没有 register），业务插件直接读自己的 Config 引用，
+    //    表单由内核按 Config schema 生成。
+    // 关键：注册失败绝不能中断本回调——后面的模型扫描与 registerTwinAdapters
+    // 都在同一段里，0.1.x 的 register 在 0.2.x 上抛 TypeError 曾让视觉孪生静默失效。
+    let scope = null;
+    const settings = sctx.settings;
+    try {
+      if (settings && typeof settings.register === 'function') {
+        scope = settings.register(NS, Config, { base: config });
+        sourceGetter = () => scope.get();
+        scope.watch(() => { refreshTwinAdapters(ctx, llm, getConfig); /* 勾选模型热更新孪生包装 */ });
+      } else {
+        sourceGetter = () => (ctx.config ?? config);
+        // 0.2.x：entry 的 volatile 字段更新后重刷孪生包装（无该事件的内核静默跳过）。
+        try {
+          ctx.on?.('config', () => { refreshTwinAdapters(ctx, llm, getConfig); });
+        } catch { /* 该内核不提供 config 事件 */ }
+      }
+    } catch (error) {
+      ctx.logger?.warn?.(`[picturereader] settings registration unavailable: ${String(error?.message || error)}`);
+      sourceGetter = () => (ctx.config ?? config);
+    }
 
     // ── 扫描所有 provider 的文本模型 → 写入 available_text_models ──
     (async () => {
@@ -431,7 +459,7 @@ export function apply(ctx, config) {
         // 兜底：把用户已勾选的模型并入列表（即使某 provider 的模型扫描漏了，
         // 只要在 vision_models 里就应显示+打钩，与孪生保持一致）。
         try {
-          const cfg = scope.get();
+          const cfg = getConfig();
           const vms = Array.isArray(cfg?.vision_models) ? cfg.vision_models : [];
           for (const entry of vms) {
             const id = typeof entry === 'string' ? entry : entry?.id;

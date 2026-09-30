@@ -132,6 +132,46 @@ export function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+/**
+ * 读取 attachment 的图片字节，跨 DSH 附件 API 两代兼容：
+ *
+ *  - `readImage(ref, signal)`：0.1.x 与 0.2.x 的本地 provider
+ *    (`dsh-attachment-local`) 都实现，返回完整性校验过的归一化字节；
+ *    但 0.2.x 起抽象基类不再声明它，因此不能作为唯一路径。
+ *  - `imageHostPath(ref)`：0.2.x 声明的官方路径，返回归一化图片的只读宿主
+ *    绝对路径（可能被缩放/重编码），直接读盘与 readImage 的字节等价。
+ *  - `readImageRequest(ref, target, signal)`：0.2.x 的请求版本 API，需要
+ *    width/height/maxBytes 目标，作为最后兜底（可能返回缩放后的版本）。
+ *
+ * @param {object} attachments - 宿主 attachments 服务。
+ * @param {object} ref - 会话日志中 image block 的 attachment 引用。
+ * @param {AbortSignal} [signal] - 可选取消信号。
+ * @returns {Promise<{ data: Uint8Array, mediaType: string }>} 图片字节与实际媒体类型。
+ */
+export async function readAttachmentImage(attachments, ref, signal) {
+  if (!attachments) throw new Error('attachments service unavailable');
+  const mediaType = ref?.mediaType ?? '';
+  if (typeof attachments.readImage === 'function') {
+    const result = await attachments.readImage(ref, signal);
+    const data = result?.data ?? result?.bytes;
+    if (data) return { data, mediaType };
+  }
+  if (typeof attachments.imageHostPath === 'function') {
+    const hostPath = attachments.imageHostPath(ref);
+    if (hostPath) return { data: new Uint8Array(await readFile(hostPath)), mediaType };
+  }
+  if (typeof attachments.readImageRequest === 'function') {
+    const result = await attachments.readImageRequest(
+      ref,
+      { width: ref?.width, height: ref?.height, maxBytes: ref?.bytes },
+      signal,
+    );
+    const data = result?.data ?? result?.bytes;
+    if (data) return { data, mediaType };
+  }
+  throw new Error('no readable image API on the mounted attachment provider');
+}
+
 /** 导出 attachment 到磁盘，返回路径（按 attachmentId 缓存，进程内复用）。 */
 const exportedPaths = new Map();
 export async function exportImage(attachment, ctx, dir) {
@@ -140,7 +180,7 @@ export async function exportImage(attachment, ctx, dir) {
   let data;
   const attachments = ctx.get?.('attachments') ?? ctx.attachments;
   try {
-    ({ data } = await attachments.readImage(attachment));
+    ({ data } = await readAttachmentImage(attachments, attachment));
   } catch (error) {
     throw new Error(`picturereader: cannot read pasted image: ${String(error && error.message || error)}`);
   }

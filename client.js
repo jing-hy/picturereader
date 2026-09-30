@@ -636,6 +636,13 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       var t = ctx.locale.bind(NS);
       ctx.effect(function () { return ctx.locale.register(NS, { zh: zh, en: en }); }, "picturereader: dictionaries");
+      // dsh 0.2.x 移除了 settingsScope（命名空间式设置模型整体退役，改为内核按
+      // Config schema 生成表单）。这里做运行时探测：拿不到就跳过自绘设置卡片，
+      // 绝不让客户端模块 apply 抛错（抛错会连带工具卡片一起失效）。
+      if (!ctx.settingsScope || typeof ctx.settingsScope.bind !== "function") {
+        console.warn("[picturereader] settingsScope unavailable (dsh 0.2+); settings card skipped");
+        return;
+      }
       var scope = ctx.settingsScope.bind({ namespace: NS });
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register({

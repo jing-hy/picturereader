@@ -23,7 +23,7 @@ picturereader 现在解决三件事：
 2. **通过「视觉孪生 adapter」让纯文本模型在 DSH 里获得原生缩略图体验**：勾选模型即生成「(视觉)」变体，粘贴图片显示原生缩略图、图片块进会话、并被自动分析成文本路径 + 本地证据再交给模型。即使上游先降级为 `attachment sha256` 文本，图片桥也会仅从本机附件对象库恢复经过文件头校验的图片并注入本地工具路径；模型拿到的永远是纯文本，不会触发 `UNSUPPORTED_CONTENT`。
 3. **本地直接修图 / 批量处理图片**：`image_edit` 提供缩放、旋转、滤镜、合成、水印、去背景、拼接、透视校正等纯 CPU 动作，图片不出本机。
 
-> **版本兼容性**：本版本专门兼容 **dsh 0.1.3-alpha.1 / dsheac 5.4.0**，同时向后兼容 **dsh 0.1.1-rc.2** 与 **dsheac 5.1.0**，以及 DeepSeek Harness EAC 4.2.0 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。`peerDependencies` 采用 `^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.3-alpha.1` 联合区间，覆盖三条 0.1.x 发布线。
+> **版本兼容性**：本版本专门兼容 **dsh 0.1.3-alpha.1 / dsheac 5.4.0**（并实测兼容 **dsh 0.2.0-rc.2**），同时向后兼容 **dsh 0.1.1-rc.2** 与 **dsheac 5.1.0**，以及 DeepSeek Harness EAC 4.2.0 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。`peerDependencies` 采用 `^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.2.0-rc.2 || ^0.1.3-alpha.1` 联合区间，覆盖 0.1.x 三条发布线并延伸到 0.2.x。
 >
 > ⚠️ **升级到 dsh 0.1.3 必须使用 v3.3.2 之后的版本**：内核 0.1.3 起 `@deepseek-ai/dsh-settings` 不再导出 `settingsNamespace()` 品牌函数（命名空间校验收进 `register()` 内部）。ESM 静态导入不存在的符号会让模块**整体加载失败**，进而拖垮整棵插件树、触发 EAC 的 guard 安全模式（表现为「一对话就报错」+ 插件大范围消失）。v3.3.3 已适配。
 
@@ -429,7 +429,19 @@ await main()
 
 ## 版本更新日志
 
-### v3.4.0（本次）
+### v3.4.1（本次）
+
+- **适配 dsh 0.2.0-rc.2（关键修复）**：0.2.x 的设置模型整体换代 —— `@deepseek-ai/dsh-settings` 不再提供「插件注册命名空间」的 `register(ns, Config, opts)`（实测服务方法只剩 `describe / schema / mutate / update / replace / write / configure` 等），客户端服务 `settingsScope` 也已移除；插件改为**直接读自身 entry 的 Config**，表单由内核按 Config schema 生成。
+  - **host**：`sctx.settings.register(...)` 改为两代兼容分支 —— 有 `register` 走 0.1.x 原逻辑；没有则 `sourceGetter` 回退到 `ctx.config` 并监听 `config` 事件刷新孪生；注册异常一律降级并告警，**不再中断后续的模型扫描与 `registerTwinAdapters`**（0.2.x 上 `register` 抛 TypeError 曾让视觉孪生与 `available_text_models` 扫描全部静默失效）。
+  - **client**：`settingsScope` 缺失时跳过自绘设置卡并告警，不再让客户端模块 `apply` 抛错（抛错会连带工具卡片一起失效）。
+  - **导出 `Config`**：按 cordis 约定改为 `export const Config`，使 0.2.x 的 settings 表单能识别本插件的配置 schema（0.1.x 下无副作用）。
+- **附件读取两代兼容**：新增 `readAttachmentImage()`，按 `readImage(ref, signal)`（0.1.x 与 0.2.x 本地 provider 均实现，但 0.2.x 起抽象基类不再声明）→ `imageHostPath(ref)` + 读盘（0.2.x 官方路径）→ `readImageRequest(ref, target, signal)` 的顺序兜底；`bridge.js` 与视觉孪生共用同一实现。
+- **`peerDependencies` 追加 `^0.2.0-rc.2`**（`@deepseek-ai/dsh-settings` / `@deepseek-ai/dsh-llm`）：0.2.x 的插件版本门禁在启动时比对 peer 声明，区间不含 0.2.x 的插件会被「skipping profile bundle」静默跳过、必须人工 `dsh plugin allow-version` 放行；本版起直接加载，无需豁免。
+- **实测（dsh 0.2.0-rc.2，官方桌面版 desktop profile）**：模型扫描产物 `~/.dsh/picturereader-models.json` 由「不生成」（改前）恢复为正常写入（改后）；`image_scan` 多轮 + `image_ocr(engine=rapid)` 端到端任务通过。
+- 测试：`npm test` 全量 **162 通过 / 0 失败**。
+- **已知缺口**：0.2.x 下自绘设置卡片暂不显示（内核移除了命名空间式设置通道）。该内核上请把配置写进 profile patch 的本插件 entry（`$DSH_HOME/profiles/<profile>/cordis.patch.yml` 的 `- id: picturereader` 行 `config:`）；卡片迁移到 0.2.x 方案（内核自动表单 / 插件自绘路由）留待后续版本。
+
+### v3.4.0
 
 - **原生识图能力感知（新功能）**：新增 `src/vision-capability.js`，从模型能力元数据 `inputModalities`（与内核图片门控同源）做三态判定 `native / text-only / unknown`。
   - **提示词**：经 `ctx.systemPrompt.section()` 注入动态段落（name `picturereader:image-capability`，order `3000`，空串自动丢弃）。原生识图时明确：**不要**用 `image_scan` / `image_sample` 这类伪多模态替代路径，**但 `image_ocr` 仍应正常使用**（原生视觉对小字/发光字会幻觉，文字以 OCR 实读为准）。`image_scan` / `image_sample` / `image_ocr` 的工具描述也各补了一句能力前提。
