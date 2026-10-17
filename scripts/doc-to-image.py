@@ -72,8 +72,15 @@ def find_soffice():
 
 def soffice_to_pdf(src, out_dir, soffice, timeout_s=120):
     """headless 把 office 文件转成 pdf，返回 pdf 路径。带独立 UserInstallation profile 避免锁冲突。"""
-    profile_dir = os.path.join(out_dir, ".lo_profile")
-    os.makedirs(profile_dir, exist_ok=True)
+    # ⚠️ profile 目录必须短：LibreOffice 收到过长的 -env:UserInstallation URI
+    # 时，soffice.bin 会在 ucrtbase 里以 0xC0000409 (BEX64,
+    # FAST_FAIL_STACK_COOKIE_CHECK_FAILURE) 直接崩溃且不产出任何文件，与本工具
+    # 的宿主进程无关（同一台机器上 149 字符的 profile 路径必崩、56 字符合正常）。
+    # 本工具的中转目录形如
+    #   %TEMP%\picturereader-doc\session-<uuid>\<ts>-<hex>\lo_pdf_xxxx\
+    # 再叠上 ".lo_profile" 很容易越过阈值，因此一次性 profile 改放系统临时目录的
+    # 短前缀目录；--outdir 用长路径没问题（实测）。
+    profile_dir = tempfile.mkdtemp(prefix="dshlo-", dir=tempfile.gettempdir())
     profile_uri = "file:///" + profile_dir.replace("\\", "/")
     cmd = [
         soffice,
@@ -86,15 +93,19 @@ def soffice_to_pdf(src, out_dir, soffice, timeout_s=120):
         src,
     ]
     # soffice 不开管道，capture_output 会乖乖返回；timeout 兜底防挂起。
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
-    base = os.path.splitext(os.path.basename(src))[0]
-    pdf_path = os.path.join(out_dir, base + ".pdf")
-    if not os.path.exists(pdf_path):
-        msg = "soffice 未产出 pdf"
-        if proc.stderr and proc.stderr.strip():
-            msg += ": " + proc.stderr.strip()[-500:]
-        raise RuntimeError(msg)
-    return pdf_path
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        base = os.path.splitext(os.path.basename(src))[0]
+        pdf_path = os.path.join(out_dir, base + ".pdf")
+        if not os.path.exists(pdf_path):
+            msg = "soffice 未产出 pdf"
+            if proc.stderr and proc.stderr.strip():
+                msg += ": " + proc.stderr.strip()[-500:]
+            raise RuntimeError(msg)
+        return pdf_path
+    finally:
+        # 一次性 profile 用完即弃（它在系统临时目录里，不属于 out_dir）。
+        shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 def render_pdf(pdf_path, out_dir, prefix, dpi, max_pages):
