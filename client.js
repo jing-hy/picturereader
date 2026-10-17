@@ -714,37 +714,28 @@ window.__ModuleLoader__.load({
       // ctx.get(name) 对未注册服务返回 undefined，是唯一安全的探测方式。
       var settingsScope = typeof ctx.get === "function" ? ctx.get("settingsScope") : void 0;
       if (settingsScope === void 0) {
-        try { settingsScope = ctx.settingsScope; } catch (_error) { settingsScope = void 0; }
+        try { settingsScope = ctx.settingsScope; } catch (_error) { settingsScope = undefined; }
       }
-      if (settingsScope && typeof settingsScope.bind === "function") {
-        // 0.1.x：内核提供命名空间式 settingsScope → 注册一级设置分区。
-        var scope = settingsScope.bind({ namespace: NS });
-        ctx.slots.inject("settings.section", function () {
-          return ctx.slots.register({
-            name: "settings.section",
-            id: "picturereader",
-            order: 30,
-            label: function () { return t("nav"); },
-            locale: NS,
-          }, function (props) {
-            return h(Section, Object.assign({}, props, { scope: scope }));
-          });
-        });
-        return;
-      }
-      // 0.2.x：settingsScope 已移除。按官方契约（dsh-client-ui-settings-plugins 的注释：
-      // 「host 平面插件的配置页住在各自的 companion 包里，注册进 Plugins 页」）把卡片注册为
-      // 「设置 → 内置插件」页里的一个 tab；数据经插件自有的 loopback 路由读写。
-      var remoteScope = createRemoteScope();
-      ctx.slots.inject("settings.plugins.tab", function () {
+      // 两代内核都把「设置」左侧导航建模为 `settings.section` 这个 list slot
+      // （general=0 / models=10 / plugins=15 / agent-presets=20），第三方插件用同一句
+      // `ctx.slots.inject("settings.section", () => ctx.slots.register(...))` 注册自己的
+      // 一级分区（内核 dsh-cordis-client-runner 的插件作者指引里就是这个例子）。
+      // 唯一差别是数据来源：
+      //   - 0.1.x：内核有命名空间式 settingsScope → bind 出 scope，内核管读写。
+      //   - 0.2.x：settingsScope 已退役 → 用插件自有的 loopback 路由（createRemoteScope），
+      //     两者对外暴露同一套 getSnapshot/load/subscribe/set/unset，Section 组件不需要分叉。
+      var scope = settingsScope && typeof settingsScope.bind === "function"
+        ? settingsScope.bind({ namespace: NS })
+        : createRemoteScope();
+      ctx.slots.inject("settings.section", function () {
         return ctx.slots.register({
-          name: "settings.plugins.tab",
+          name: "settings.section",
           id: "picturereader",
-          order: 30,
+          order: 22,
           label: function () { return t("nav"); },
           locale: NS,
         }, function (props) {
-          return h(Section, Object.assign({}, props, { scope: remoteScope }));
+          return h(Section, Object.assign({}, props, { scope: scope }));
         });
       });
     }
