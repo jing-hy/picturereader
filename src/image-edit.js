@@ -296,7 +296,9 @@ export function createImageEditTool(ctx) {
           bytes: result.bytes ?? null,
           format: result.format ?? null,
           summary: result.summary || `image_edit ${action} 完成。`,
-          extra: result.extra ?? undefined,
+          // 0.2.x 的工具输出要求 lossless JSON：显式 undefined 字段会被判为
+          // "invalid output: value is not lossless JSON"，因此按需展开。
+          ...(result.extra !== undefined ? { extra: result.extra } : {}),
           _baseDir: base,
         };
       } finally {
