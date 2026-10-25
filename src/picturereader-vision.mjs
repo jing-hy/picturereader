@@ -164,17 +164,26 @@ export function registerTwinAdapters(ctx, llm, getConfig) {
     // 导致既有孪生 proxy 失效（模型名丢失「(视觉)」后缀）。监听
     // llm/adapters-updated 重新包装，避免依赖 DSH 重启恢复。
     const onAdaptersUpdated = () => refreshTwinAdapters(ctx, llm, getConfig);
-    ctx.on('llm/adapters-updated', onAdaptersUpdated);
-    // 卸载时恢复：解绑事件 + 各 provider 还原为最近一次的真实 adapter。
+    // cordis 4.x（dsh 0.2.x）的 on() 返回 disposer，且内核已不再提供 ctx.off
+    // （4.0.5 全文没有 off，旧内核才有）。直接调 ctx.off 会在卸载/HMR 时抛
+    // TypeError 并中断下面的 adapter 还原，所以优先用 disposer、再退回 ctx.off。
+    const disposeAdaptersUpdated = ctx.on('llm/adapters-updated', onAdaptersUpdated);
+    // 卸载时恢复：先把各 provider 还原为最近一次的真实 adapter，再解绑事件。
     ctx.effect(() => () => {
-      ctx.off('llm/adapters-updated', onAdaptersUpdated);
-      for (const [provider, orig] of twinState.wrapped) {
-        try {
-          const reg = llm.registration(provider);
-          if (reg) reg.adapter = orig;
-        } catch { /* provider no longer registered; ignore */ }
-      }
+      const wrapped = twinState ? twinState.wrapped : null;
       twinState = null;
+      if (wrapped) {
+        for (const [provider, orig] of wrapped) {
+          try {
+            const reg = llm.registration(provider);
+            if (reg) reg.adapter = orig;
+          } catch { /* provider no longer registered; ignore */ }
+        }
+      }
+      try {
+        if (typeof disposeAdaptersUpdated === 'function') disposeAdaptersUpdated();
+        else if (typeof ctx.off === 'function') ctx.off('llm/adapters-updated', onAdaptersUpdated);
+      } catch { /* listener already disposed */ }
     });
   }
   return refreshTwinAdapters(ctx, llm, getConfig);

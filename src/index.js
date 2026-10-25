@@ -334,16 +334,21 @@ export function apply(ctx, config) {
   });
 
   // ── 注册内置技能（image-reading）──
-  try {
-    if (ctx.skills && typeof ctx.skills.register === 'function') {
-      ctx.effect(() => {
-        return ctx.skills.register(IMAGE_READING_SKILL);
+  // 'skills' 是软依赖：cordis 里直接读未 inject 的服务会被断言拦住（原来的
+  // `ctx.skills &&` 守卫因此永远为假，内置 skill 静默注册不上），而写进模块级
+  // inject 又会让没有该服务的老内核永不 apply。折中用 ctx.inject 子 fiber：
+  // 服务在时注册、不在时该 fiber 静默等待，主插件不受影响。
+  ctx.inject(['skills'], (sctx) => {
+    try {
+      if (!sctx.skills || typeof sctx.skills.register !== 'function') return;
+      sctx.effect(() => {
+        return sctx.skills.register(IMAGE_READING_SKILL);
       }, 'picturereader: image-reading skill');
       console.log('[picturereader] registered image-reading skill');
+    } catch (error) {
+      ctx.logger?.warn?.(`[picturereader] skill registration failed: ${String(error)}`);
     }
-  } catch (error) {
-    ctx.logger?.warn?.(`[picturereader] skill registration failed: ${String(error)}`);
-  }
+  });
 
   // ── 注册模型列表 API 路由（供 client 设置卡读取扫描结果）──
   try {

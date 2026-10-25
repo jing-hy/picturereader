@@ -1,7 +1,9 @@
 # picturereader
 
-> **v3.4.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档 / 修图」能力。
+> **v3.6.0** — 给纯文本模型（DeepSeek / text-only）的全能「看图 / 读文档 / 修图」能力。
 > 融合 **视觉孪生 adapter**（把任意文本模型原位包装成「支持图片」→ DSH 原生缩略图 + 图片块自动分析）、**三模式路由**、**本地像素级工具链**（scan / OCR×4 引擎 / crop / palette / compare / batch）、**文档转图片**（pdf / word / excel / ppt）、**本地修图工具 `image_edit`**（Pillow/OpenCV 纯 CPU：缩放 / 旋转 / 滤镜 / 合成 / 水印 / 去背景 / 超分等）与**可选外部 VLM 桥**。一个插件全包。
+>
+> **v3.6.0 新增**：**适配 dsh 0.3.0 以下全部内核**。`peerDependencies` 统一为 `>=0.1.0-rc.6 <0.3.0-0`（上界带 `-0`，把 0.3.0 的任何预发布也一并排除），宿主按 `includePrerelease` 语义做版本门禁，0.1.x / 0.2.x 全系列（含 `0.2.1-rc.3` 这类预发布内核）一次通过。同时修掉两处真实不兼容：`ctx.off` 在 cordis 4.x 已不存在（视觉孪生卸载/HMR 时会抛错并漏掉 adapter 还原），改用 `on()` 返回的 disposer；`skills` 未注入导致内置 `image-reading` skill 静默注册失败，改用 `ctx.inject` 软注入。
 >
 > **v3.4.0 新增**：**原生识图能力感知**。插件现在从**模型能力元数据**（`inputModalities`，与 DSH 内核的图片门控同源）判断当前会话的模型是否**自己就能看图**：命中时在系统提示词里明确说明「**不要**用 `image_scan` / `image_sample` 这类"伪多模态"替代路径，**但 `image_ocr` 仍应正常使用**」，并让粘贴/读取的图片**直通**该模型、不再降级成文本引导；纯文本模型与元数据缺失（未知）时行为与 v3.3.3 完全一致。判定走**未包装的原始 adapter**，因此不会被本插件自己的视觉孪生误判成原生识图。
 >
@@ -23,7 +25,7 @@ picturereader 现在解决三件事：
 2. **通过「视觉孪生 adapter」让纯文本模型在 DSH 里获得原生缩略图体验**：勾选模型即生成「(视觉)」变体，粘贴图片显示原生缩略图、图片块进会话、并被自动分析成文本路径 + 本地证据再交给模型。即使上游先降级为 `attachment sha256` 文本，图片桥也会仅从本机附件对象库恢复经过文件头校验的图片并注入本地工具路径；模型拿到的永远是纯文本，不会触发 `UNSUPPORTED_CONTENT`。
 3. **本地直接修图 / 批量处理图片**：`image_edit` 提供缩放、旋转、滤镜、合成、水印、去背景、拼接、透视校正等纯 CPU 动作，图片不出本机。
 
-> **版本兼容性**：本版本专门兼容 **dsh 0.1.3-alpha.1 / dsheac 5.4.0**（并实测兼容 **dsh 0.2.0-rc.2**），同时向后兼容 **dsh 0.1.1-rc.2** 与 **dsheac 5.1.0**，以及 DeepSeek Harness EAC 4.2.0 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7。`peerDependencies` 采用 `^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.2.0-rc.2 || ^0.1.3-alpha.1` 联合区间，覆盖 0.1.x 三条发布线并延伸到 0.2.x。
+> **版本兼容性**：适配 **dsh 0.3.0 以下全部版本**（0.1.0-rc.6 起，含 0.1.x / 0.2.x 各条发布线的预发布与正式版；实测运行版本为 **dsh 0.2.1-rc.3**）。`peerDependencies` 统一写作 `>=0.1.0-rc.6 <0.3.0-0` —— 上界带 `-0` 是为了把 0.3.0 的任何预发布也挡在外面；宿主按 `includePrerelease` 语义比对，所以 0.2.1-rc.3 这类预发布内核能直接通过版本门禁。dsheac 5.x、DeepSeek Harness EAC 4.2.0 与 `@deepseek-ai/dsh-client-ui-workspace` rc.7 的兼容性保持不变。
 >
 > ⚠️ **升级到 dsh 0.1.3 必须使用 v3.3.2 之后的版本**：内核 0.1.3 起 `@deepseek-ai/dsh-settings` 不再导出 `settingsNamespace()` 品牌函数（命名空间校验收进 `register()` 内部）。ESM 静态导入不存在的符号会让模块**整体加载失败**，进而拖垮整棵插件树、触发 EAC 的 guard 安全模式（表现为「一对话就报错」+ 插件大范围消失）。v3.3.3 已适配。
 
@@ -429,7 +431,14 @@ await main()
 
 ## 版本更新日志
 
-### v3.5.0（本次）
+### v3.6.0（本次）
+
+- **适配 dsh 0.3.0 以下全部内核（版本门禁）**：`peerDependencies` 里的两条 dsh 依赖（`@deepseek-ai/dsh-settings` / `@deepseek-ai/dsh-llm`）由逐版枚举的 `^0.x` 联合区间改为 `>=0.1.0-rc.6 <0.3.0-0`。上界写 `-0` 而不是 `0.3.0`：宿主 `unmetRequirements()` 用 `semver.satisfies(range, { includePrerelease: true })` 判定，`<0.3.0` 会把 `0.3.0-rc.1` 一并放进来，`<0.3.0-0` 才是真正的「0.3.0 以下」。实测（dsh 0.2.1-rc.3 宿主内核）：`0.1.0-rc.6`→`0.2.9` 全部通过门禁，`0.3.0-rc.1` / `0.3.0` 均被拒绝；当前运行版本 `0.2.1-rc.3` 通过（改前在 npm 默认语义下并不满足，只因门禁带 `includePrerelease` 而侥幸放行）。
+- **修复 `ctx.off` 在 cordis 4.x 不存在（卸载/HMR 异常）**：`picturereader-vision.mjs` 的事件解绑改用 `ctx.on()` 返回的 disposer（旧内核才有的 `ctx.off` 作为兜底），并把「各 provider 还原真实 adapter」提到解绑之前 —— 原先 `ctx.off` 抛 TypeError 会让还原循环整段跳过，孪生 Proxy 残留在 llm 注册表里。
+- **修复内置 `image-reading` skill 静默注册失败**：`skills` 不在模块级 `inject` 里，读 `ctx.skills` 会被 cordis 的服务断言拦住，于是 `ctx.skills &&` 守卫恒为假、抛出的异常又被 `try/catch` 吞掉，skill 一直没注册上。改为 `ctx.inject(['skills'], …)` 软注入：服务在时注册、不在时子 fiber 静默等待；模块级 inject 保持 `tools/fs/llm/attachments` 不变，没有该服务的老内核不会因此永不 apply。
+- 测试：`npm test` 共 162 例、161 通过；唯一失败项 `paddle engine` 属本机 PaddleOCR 环境不可用（`C:\Users\Administrator\paddle_venv` 的 Python 报 `Could not determine home directory`，引擎降级为 windows），与本次改动无关。
+
+### v3.5.0
 
 - **0.2.x 设置卡片回归（新功能）**：0.2.x 移除了 `settingsScope`（命名空间式设置模型整体退役），v3.4.1 只能在老内核上显示自绘卡片。本版按官方契约把卡片注册为 **「设置 → 内置插件」页里的一个 tab**（`slots.register` 到 `settings.plugins.tab`，与官方 `dsh-client-ui-settings-plugin-inventory` 同一写法），并把数据通道换成插件自有的 loopback 路由：
   - `GET /picturereader/config` 读当前生效配置（entry config + 用户级覆盖层，Schema 默认值由 `Config()` 补齐）；
